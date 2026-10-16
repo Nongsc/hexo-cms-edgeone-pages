@@ -53,7 +53,16 @@ function hasNativeSqlite(): boolean {
 
 /** 本地数据库文件路径。 */
 function localDatabasePath(): string {
-  return resolveDatabasePath(process.env.CMS_DB_PATH ?? "apps/api/data/cms.sqlite");
+  const configured = process.env.CMS_DB_PATH;
+  if (configured) {
+    return resolveDatabasePath(configured);
+  }
+  // Cloud Functions 部署环境：优先 /tmp（可写临时目录）
+  if (process.env.CMS_DB_REMOTE === "cos") {
+    return "/tmp/cms.sqlite";
+  }
+  // 本地开发：项目相对路径
+  return resolveDatabasePath("apps/api/data/cms.sqlite");
 }
 
 /**

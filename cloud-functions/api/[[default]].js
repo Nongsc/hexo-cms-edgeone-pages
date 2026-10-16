@@ -5846,7 +5846,14 @@ function hasNativeSqlite() {
   return major > 22 || major === 22 && minor >= 5;
 }
 function localDatabasePath() {
-  return resolveDatabasePath(process.env.CMS_DB_PATH ?? "apps/api/data/cms.sqlite");
+  const configured = process.env.CMS_DB_PATH;
+  if (configured) {
+    return resolveDatabasePath(configured);
+  }
+  if (process.env.CMS_DB_REMOTE === "cos") {
+    return "/tmp/cms.sqlite";
+  }
+  return resolveDatabasePath("apps/api/data/cms.sqlite");
 }
 async function ensureDatabase() {
   if (singleton) return singleton;
@@ -13938,19 +13945,34 @@ function createRemoteDb() {
   });
 }
 async function onRequest(context) {
-  if (!built) {
-    if (!builtPromise) {
-      builtPromise = build();
-    }
-    built = await builtPromise;
-  }
   try {
-    return await built.app.fetch(context.request);
-  } finally {
-    if (built.remoteDb) {
-      persistDatabase();
-      await built.remoteDb.sync().catch(() => void 0);
+    if (!built) {
+      if (!builtPromise) {
+        builtPromise = build();
+      }
+      built = await builtPromise;
     }
+    try {
+      return await built.app.fetch(context.request);
+    } finally {
+      if (built.remoteDb) {
+        persistDatabase();
+        await built.remoteDb.sync().catch(() => void 0);
+      }
+    }
+  } catch (error) {
+    console.error("[eo] onRequest \u5931\u8D25:", error);
+    return new Response(
+      JSON.stringify({
+        code: 500,
+        message: `\u51FD\u6570\u6267\u884C\u5931\u8D25\uFF1A${error?.message ?? String(error)}`,
+        stack: error?.stack?.slice(0, 800) ?? null
+      }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json; charset=UTF-8" }
+      }
+    );
   }
 }
 var eo_default = onRequest;

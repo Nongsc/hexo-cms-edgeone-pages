@@ -1,0 +1,11 @@
+fix: 增加函数错误捕获与部署环境数据库路径
+
+502 排查：API 已到达 Cloud Functions 但函数执行失败。为定位具体原因
+并增强部署健壮性，做两处修复：
+
+1. onRequest 增加全局 try-catch：初始化或执行失败时返回可读 JSON
+   （含 message 与 stack），而非让函数直接抛 502 无法排查。
+
+2. 数据库路径在部署环境（CMS_DB_REMOTE=cos）默认用 /tmp/cms.sqlite：
+   Cloud Functions 运行时的文件系统与构建期不同，项目相对路径可能
+   不可写或解析错误；/tmp 是标准可写临时目录，配合 COS 托管实现持久化。

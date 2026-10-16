@@ -86,21 +86,38 @@ type EoContext = {
 
 /** 统一入口：把 Cloud Functions 的 Web Request 转交 Hono。 */
 export async function onRequest(context: EoContext): Promise<Response> {
-  if (!built) {
-    if (!builtPromise) {
-      builtPromise = build();
-    }
-    built = await builtPromise;
-  }
-
   try {
-    return await built.app.fetch(context.request);
-  } finally {
-    // 请求结束后把数据库同步到 COS（sql.js 模式需先导出为文件）
-    if (built.remoteDb) {
-      persistDatabase();
-      await built.remoteDb.sync().catch(() => undefined);
+    if (!built) {
+      if (!builtPromise) {
+        builtPromise = build();
+      }
+      built = await builtPromise;
     }
+
+    try {
+      return await built.app.fetch(context.request);
+    } finally {
+      // 请求结束后把数据库同步到 COS（sql.js 模式需先导出为文件）
+      if (built.remoteDb) {
+        persistDatabase();
+        await built.remoteDb.sync().catch(() => undefined);
+      }
+    }
+  } catch (error) {
+    // 全局兜底：函数初始化或执行失败时，返回可读的 JSON 错误信息，
+    // 避免 Cloud Functions 直接抛 502 导致无法排查。
+    console.error("[eo] onRequest 失败:", error);
+    return new Response(
+      JSON.stringify({
+        code: 500,
+        message: `函数执行失败：${(error as Error)?.message ?? String(error)}`,
+        stack: (error as Error)?.stack?.slice(0, 800) ?? null
+      }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json; charset=UTF-8" }
+      }
+    );
   }
 }
 
