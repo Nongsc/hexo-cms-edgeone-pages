@@ -11,6 +11,9 @@ dev-dist
 apps/api/dist-edge
 *.tsbuildinfo
 
+# EdgeOne Cloud Functions 构建产物（由 build:edge 生成）
+cloud-functions
+
 # 日志
 *.log
 npm-debug.log*

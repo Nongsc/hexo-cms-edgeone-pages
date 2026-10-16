@@ -1,12 +1,12 @@
 /**
  * SQLite 数据访问层（Model）。
  *
- * 运行环境无关：Node 22+ 与 EdgeOne Edge Functions（Node runtime）均可使用
+ * 运行环境无关：Node 22+ 与 EdgeOne Cloud Functions（Node runtime）均可使用
  * 内置的 `node:sqlite` 模块，因此不需要任何原生编译依赖。
  */
 
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, existsSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,12 +18,27 @@ export interface SqliteOptions {
 let singleton: DatabaseSync | null = null;
 
 /**
- * 项目根目录（monorepo 根），由本文件位置推导：
- *   packages/core/src/db/sqlite.ts -> <root>/packages/core/src/db
- * 这样无论从哪个工作目录启动（pnpm --filter、tsx、Edge Functions），
- * 相对路径都解析到同一处，避免「换目录启动就丢配置」。
+ * 项目根目录（monorepo 根）。
+ *
+ * 不依赖固定目录级数（bundle 输出位置会变：本地 apps/api、部署时
+ * cloud-functions/api 等），而是从本文件位置向上查找 monorepo 标志文件
+ * pnpm-workspace.yaml。这样无论从哪个工作目录启动、bundle 输出到哪里，
+ * 相对路径都解析到同一处。
  */
-const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+const PROJECT_ROOT = findProjectRoot(dirname(fileURLToPath(import.meta.url)));
+
+function findProjectRoot(startDir: string): string {
+  let dir = startDir;
+  // 向上最多找 10 层，避免异常情况下的死循环
+  for (let i = 0; i < 10; i += 1) {
+    if (existsSync(resolve(dir, "pnpm-workspace.yaml"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  // 兜底：退回到原来的固定推导（packages/core/src/db -> 根）
+  return resolve(startDir, "../../../..");
+}
 
 /** 取得进程内唯一的数据库连接（懒初始化 + 建表）。 */
 export function getDatabase(options: SqliteOptions = {}): DatabaseSync {

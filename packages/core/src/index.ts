@@ -1,6 +1,7 @@
 export * from "./types/index";
 export * from "./constants/index";
 export * from "./db/sqlite";
+export * from "./db/remote";
 export * from "./repositories/index";
 export * from "./utils/markdown";
 export * from "./utils/common";
