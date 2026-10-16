@@ -1,0 +1,142 @@
+# Hexo Pro CMS — 博客仓库 CI 工作流模板
+#
+# 将此文件复制到你的 Hexo 博客仓库的 .github/workflows/deploy.yml，
+# CMS 的「部署」按钮通过 workflow_dispatch 触发它。
+#
+# 支持三种发布目标，通过 inputs.channel 选择：
+#   - edgeone-pages   （默认）腾讯云 EdgeOne Pages
+#   - github-pages              GitHub Pages
+#   - cloudflare-pages          Cloudflare Pages
+
+name: Deploy Hexo Blog
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "部署通道"
+        required: true
+        default: "edgeone-pages"
+        type: choice
+        options:
+          - edgeone-pages
+          - github-pages
+          - cloudflare-pages
+      branch:
+        description: "源分支"
+        required: false
+        default: "main"
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f pnpm-lock.yaml ]; then
+            npm i -g pnpm && pnpm i --frozen-lockfile
+          else
+            npm i
+          fi
+
+      - name: Install theme dependencies
+        run: |
+          if [ -d "themes" ]; then
+            for dir in themes/*/; do
+              if [ -f "$dir/package.json" ]; then
+                echo "Installing deps for $dir"
+                npm --prefix "$dir" ci --omit=dev || npm --prefix "$dir" i --omit=dev
+              fi
+            done
+          fi
+
+      - name: Build site
+        run: npx hexo generate
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: public
+          path: public/
+          retention-days: 1
+
+  deploy-edgeone:
+    needs: build
+    if: inputs.channel == 'edgeone-pages' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: public
+          path: public
+
+      # 方式一（推荐）：EdgeOne Pages 直接绑定本仓库，可删除此步骤，
+      # 由 EdgeOne 自动执行上面的 build 任务并发布 public 目录。
+      #
+      # 方式二：使用 CLI 手动发布（需在仓库 Secrets 中配置 EDGEONE_API_TOKEN）
+      - name: Publish to EdgeOne Pages
+        if: ${{ env.EDGEONE_API_TOKEN != '' }}
+        env:
+          EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+        run: |
+          npm i -g @edgeone/cli
+          edgeone pages deploy public --project-name ${{ secrets.EDGEONE_PROJECT_NAME }} --token "$EDGEONE_API_TOKEN"
+
+  deploy-github-pages:
+    needs: build
+    if: inputs.channel == 'github-pages'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: public
+          path: public
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./public
+          publish_branch: gh-pages
+
+  deploy-cloudflare:
+    needs: build
+    if: inputs.channel == 'cloudflare-pages'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: public
+          path: public
+
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy public --project-name=${{ secrets.CLOUDFLARE_PROJECT_NAME }}

@@ -1,0 +1,20 @@
+{
+  "name": "hexo-pro-edgeone",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hexo-Pro 功能的纯 Web CMS：EdgeOne Pages 部署，GitHub API 管理内容，pure-admin UI，SQLite 持久化，腾讯云 COS 图床",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "dev:web": "pnpm --filter @hexo-pro/web dev",
+    "dev:api": "pnpm --filter @hexo-pro/api dev",
+    "build": "pnpm --filter @hexo-pro/core typecheck && pnpm --filter @hexo-pro/api typecheck && pnpm --filter @hexo-pro/api build:edge && pnpm --filter @hexo-pro/web build",
+    "test": "pnpm --filter @hexo-pro/core test && pnpm --filter @hexo-pro/api test",
+    "typecheck": "pnpm -r typecheck",
+    "clean": "pnpm -r exec rm -rf dist dist-edge .turbo 2>/dev/null; echo cleaned"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "packageManager": "pnpm@11.7.0"
+}

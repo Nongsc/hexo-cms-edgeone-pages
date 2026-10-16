@@ -1,0 +1,91 @@
+# Hexo 主题卸载工作流
+#
+# 将此文件放到博客仓库的 .github/workflows/manage-theme.yml。
+# CMS「主题管理 → 卸载」通过 workflow_dispatch 触发它。
+#
+# 支持两种卸载方式：
+#   - git：删除 themes/<name> 目录
+#   - npm：npm/pnpm uninstall hexo-theme-<name>
+
+name: Manage Theme
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action: uninstall"
+        required: true
+        default: "uninstall"
+        type: string
+      uninstall_method:
+        description: "Uninstall method: git or npm"
+        required: true
+        default: "git"
+        type: string
+      theme_name:
+        description: "Theme name (e.g. landscape)"
+        required: true
+        type: string
+      package_name:
+        description: "npm package name (e.g. hexo-theme-landscape)"
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  uninstall:
+    if: inputs.action == 'uninstall'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Uninstall theme (git)
+        if: inputs.uninstall_method == 'git'
+        shell: bash
+        run: |
+          rm -rf "themes/${{ inputs.theme_name }}"
+          echo "Removed themes/${{ inputs.theme_name }}"
+
+      - name: Uninstall theme (npm)
+        if: inputs.uninstall_method == 'npm'
+        shell: bash
+        run: |
+          PKG="${{ inputs.package_name }}"
+          if [ -z "$PKG" ]; then
+            PKG="hexo-theme-${{ inputs.theme_name }}"
+          fi
+          echo "Uninstalling $PKG"
+          npm uninstall "$PKG" || pnpm remove "$PKG" || echo "uninstall failed, will remove from package.json"
+          # 兜底：如果 npm uninstall 失败，手动从 package.json 移除
+          if [ -f package.json ]; then
+            PKG="$PKG" node -e '
+              const fs = require("fs");
+              const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+              let changed = false;
+              for (const field of ["dependencies", "devDependencies"]) {
+                if (pkg[field] && pkg[field][process.env.PKG]) {
+                  delete pkg[field][process.env.PKG];
+                  changed = true;
+                }
+              }
+              if (changed) fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+            '
+          fi
+
+      - name: Commit & push
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Uninstall theme: ${{ inputs.theme_name }}" || echo "no changes"
+          git push

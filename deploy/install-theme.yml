@@ -1,0 +1,116 @@
+# Hexo 主题安装工作流（升级版）
+#
+# 将此文件覆盖博客仓库的 .github/workflows/install-theme.yml。
+# CMS「主题管理 → 安装主题」通过 workflow_dispatch 触发它。
+#
+# 支持两种安装方式（二选一，通过 install_method 选择）：
+#   - git：git clone 主题仓库到 themes/<name>
+#   - npm：npm/pnpm 安装主题包（如 hexo-theme-landscape）
+#
+# 无论哪种方式，都支持安装额外依赖包 / Hexo 插件。
+
+name: Install Theme
+
+on:
+  workflow_dispatch:
+    inputs:
+      install_method:
+        description: "Install method: git or npm"
+        required: true
+        default: "git"
+        type: string
+      theme_url:
+        description: "Theme repo URL (git method)"
+        required: false
+        default: ""
+        type: string
+      theme_name:
+        description: "Theme directory name (git method)"
+        required: false
+        default: ""
+        type: string
+      theme_branch:
+        description: "Theme branch (git method, empty = default)"
+        required: false
+        default: ""
+        type: string
+      package_name:
+        description: "Theme npm/pnpm package name (npm method)"
+        required: false
+        default: ""
+        type: string
+      dependencies:
+        description: "Extra dependencies (space/comma/newline separated)"
+        required: false
+        default: ""
+        type: string
+      package_manager:
+        description: "Package manager: npm or pnpm"
+        required: false
+        default: "npm"
+        type: string
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install theme (git clone)
+        if: inputs.install_method == 'git'
+        shell: bash
+        run: |
+          rm -rf "themes/${{ inputs.theme_name }}"
+          if [ -n "${{ inputs.theme_branch }}" ]; then
+            git clone --depth 1 --branch "${{ inputs.theme_branch }}" \
+              "${{ inputs.theme_url }}" "themes/${{ inputs.theme_name }}"
+          else
+            git clone --depth 1 "${{ inputs.theme_url }}" "themes/${{ inputs.theme_name }}"
+          fi
+          rm -rf "themes/${{ inputs.theme_name }}/.git"
+
+      - name: Install theme (command line)
+        if: inputs.install_method == 'npm'
+        shell: bash
+        run: |
+          PM="${{ inputs.package_manager }}"
+          if [ "$PM" != "pnpm" ]; then PM="npm"; fi
+          if [ "$PM" = "pnpm" ]; then
+            # 确保 pnpm 可用
+            command -v pnpm >/dev/null 2>&1 || npm i -g pnpm
+          fi
+          $PM install "${{ inputs.package_name }}"
+
+      - name: Install extra dependencies
+        shell: bash
+        run: |
+          if [ -z "${{ inputs.dependencies }}" ]; then
+            echo "no extra dependencies"
+            exit 0
+          fi
+          PM="${{ inputs.package_manager }}"
+          if [ "$PM" != "pnpm" ]; then PM="npm"; fi
+          if [ "$PM" = "pnpm" ]; then
+            command -v pnpm >/dev/null 2>&1 || npm i -g pnpm
+          fi
+          echo "${{ inputs.dependencies }}" | tr ',\n' ' ' | tr -s ' ' | xargs -n1 echo | while read -r pkg; do
+            [ -n "$pkg" ] && $PM install "$pkg"
+          done
+
+      - name: Commit & push
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Install theme (${{ inputs.install_method }})" || echo "no changes"
+          git push

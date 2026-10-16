@@ -1,0 +1,50 @@
+{
+  "//": "EdgeOne Pages 项目配置。详见 https://pages.edgeone.ai/document/edgeone-json",
+  "name": "hexo-pro-cms",
+  "framework": "vite",
+  "buildCommand": "pnpm install --no-frozen-lockfile && pnpm --filter @hexo-pro/web run build",
+  "outputDirectory": "apps/web/dist",
+  "functions": {
+    "directory": "apps/api/dist-edge"
+  },
+  "routes": [
+    {
+      "//": "API 请求转发到 Edge Functions（Hono 应用）",
+      "src": "/api/(.*)",
+      "dest": "/apps/api/dist-edge/index.js",
+      "continue": false
+    },
+    {
+      "//": "单页应用回退：非文件路径统一返回 index.html",
+      "src": "/((?!api/).*)",
+      "dest": "/index.html",
+      "continue": false
+    }
+  ],
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    }
+  ],
+  "env": {
+    "//": "以下变量在 EdgeOne Pages 控制台「环境变量」中配置，切勿提交真实密钥",
+    "CMS_ADMIN_USERNAME": "admin",
+    "CMS_ADMIN_PASSWORD": "change-me",
+    "CMS_DB_PATH": "file:./data/cms.sqlite"
+  }
+}
