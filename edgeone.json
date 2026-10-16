@@ -1,13 +1,15 @@
 {
   "name": "hexo-pro-cms",
   "framework": "vite",
-  "nodeVersion": "22.11.0",
+  "nodeVersion": "22.21.1",
   "installCommand": "pnpm install --no-frozen-lockfile",
   "buildCommand": "pnpm --filter @hexo-pro/api build:edge && pnpm --filter @hexo-pro/web build",
   "outputDirectory": "apps/web/dist",
   "cloudFunctions": {
+    "maxDuration": 60,
     "nodejs": {
-      "maxDuration": 60
+      "externalNodeModules": ["sql.js"],
+      "includeFiles": ["apps/api/data/**"]
     }
   },
   "rewrites": [

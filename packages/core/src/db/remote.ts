@@ -11,24 +11,32 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
-import type { CosClient } from "../services/cos";
+import { CosClient, type CosConfig } from "../services/cos";
 
 /** 数据库在 COS 中的对象键。 */
 const DB_COS_KEY = "cms/database/cms.sqlite";
 
 export interface RemoteDbOptions {
-  cos: CosClient;
+  /**
+   * COS 客户端实例或凭据配置。
+   * 传凭据配置更常见：启动早期 settings 表可能为空，无法从数据库读取 COS 配置，
+   * 因此凭据通常来自环境变量。
+   */
+  cos: CosClient | CosConfig;
   /** 本地数据库文件路径。 */
   localPath: string;
-  /** 上次同步时数据库的修改时间（ms），用于判断是否有写入。 */
-  lastSyncMtimeMs?: number;
 }
 
 export class RemoteDatabase {
+  private readonly cos: CosClient;
+  private readonly localPath: string;
   private lastSyncMtimeMs = 0;
   private initialized = false;
 
-  constructor(private readonly options: RemoteDbOptions) {}
+  constructor(options: RemoteDbOptions) {
+    this.cos = options.cos instanceof CosClient ? options.cos : new CosClient(options.cos);
+    this.localPath = options.localPath;
+  }
 
   /** 是否启用了云端持久化。 */
   static isEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -40,21 +48,20 @@ export class RemoteDatabase {
     if (this.initialized) return;
     this.initialized = true;
 
-    const { cos, localPath } = this.options;
     try {
       // COS 上没有数据库时保持空库（首次部署）
-      const { objects } = await cos.listObjects(DB_COS_KEY, 1);
+      const { objects } = await this.cos.listObjects(DB_COS_KEY, 1);
       if (objects.length === 0) return;
 
       // 下载数据库文件到本地
-      const url = cos.urlForKey(DB_COS_KEY);
+      const url = this.cos.urlForKey(DB_COS_KEY);
       const response = await fetch(url);
       if (!response.ok) {
         console.warn(`[remote-db] 下载失败: ${response.status}`);
         return;
       }
       const buffer = Buffer.from(await response.arrayBuffer());
-      writeFileSync(localPath, buffer);
+      writeFileSync(this.localPath, buffer);
       this.lastSyncMtimeMs = this.currentMtime();
       console.log(`[remote-db] 已从 COS 恢复数据库 (${buffer.length} bytes)`);
     } catch (error) {
@@ -64,15 +71,14 @@ export class RemoteDatabase {
 
   /** 请求结束后调用：若数据库有变更，上传到 COS。 */
   async sync(): Promise<void> {
-    const { cos, localPath } = this.options;
-    if (!existsSync(localPath)) return;
+    if (!existsSync(this.localPath)) return;
 
     const mtime = this.currentMtime();
     if (mtime === this.lastSyncMtimeMs) return; // 无变更
 
     try {
-      const buffer = readFileSync(localPath);
-      await cos.putObject(DB_COS_KEY, buffer, "application/octet-stream", "cms/database");
+      const buffer = readFileSync(this.localPath);
+      await this.cos.putObject(DB_COS_KEY, buffer, "application/octet-stream", "cms/database");
       this.lastSyncMtimeMs = mtime;
       console.log(`[remote-db] 数据库已同步到 COS (${buffer.length} bytes)`);
     } catch (error) {
@@ -81,8 +87,7 @@ export class RemoteDatabase {
   }
 
   private currentMtime(): number {
-    const { localPath } = this.options;
-    if (!existsSync(localPath)) return 0;
-    return statSync(localPath).mtimeMs;
+    if (!existsSync(this.localPath)) return 0;
+    return statSync(this.localPath).mtimeMs;
   }
 }

@@ -1,20 +1,31 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { resetDatabaseForTesting, DocumentRepository, TodoRepository, SettingRepository } from "../src";
-import type { DatabaseSync } from "node:sqlite";
-import { getDatabase } from "../src/db/sqlite";
+import {
+  ensureDatabase,
+  resetDatabaseForTesting,
+  DocumentRepository,
+  TodoRepository,
+  SettingRepository
+} from "../src";
+import type { AppDatabase } from "../src/db/sqlite";
 
 /**
  * Repository 测试使用独立的内存库：
- * 通过 CMS_DB_PATH=:memory: 让每个测试文件拿到干净的数据。
+ * 通过 CMS_DB_PATH=:memory: 让每个测试拿到干净的数据。
+ *
+ * 注意：resetDatabaseForTesting() 会关闭并清空单例，因此每个测试都要
+ * 重新 ensureDatabase() 并刷新 db 引用，否则会命中已关闭的实例。
  */
-beforeEach(() => {
+let db: AppDatabase;
+
+beforeEach(async () => {
   process.env.CMS_DB_PATH = ":memory:";
   resetDatabaseForTesting();
+  db = await ensureDatabase();
 });
 
 describe("DocumentRepository", () => {
-  const seed = (db: DatabaseSync) => {
-    const repo = new DocumentRepository(db);
+  const seed = (database: AppDatabase) => {
+    const repo = new DocumentRepository(database);
     repo.insert({
       kind: "post",
       title: "第一篇文章",
@@ -53,7 +64,6 @@ describe("DocumentRepository", () => {
   };
 
   it("建表并插入文档", () => {
-    const db = getDatabase();
     const repo = seed(db);
     const doc = repo.findByPath("source/_posts/first-post.md");
     expect(doc).not.toBeNull();
@@ -63,7 +73,6 @@ describe("DocumentRepository", () => {
   });
 
   it("分页列表排除已删除并按置顶排序", () => {
-    const db = getDatabase();
     const repo = seed(db);
     const page = repo.list({ kind: "post", pageSize: 10 });
     expect(page.total).toBe(2);
@@ -72,7 +81,6 @@ describe("DocumentRepository", () => {
   });
 
   it("按状态过滤", () => {
-    const db = getDatabase();
     const repo = seed(db);
     const published = repo.list({ kind: "post", status: "published" });
     expect(published.total).toBe(1);
@@ -80,7 +88,6 @@ describe("DocumentRepository", () => {
   });
 
   it("关键词搜索命中标题与正文", () => {
-    const db = getDatabase();
     const repo = seed(db);
     expect(repo.list({ kind: "post", keyword: "第一篇" }).total).toBe(1);
     expect(repo.list({ kind: "post", keyword: "草稿正文" }).total).toBe(1);
@@ -88,14 +95,12 @@ describe("DocumentRepository", () => {
   });
 
   it("按标签过滤", () => {
-    const db = getDatabase();
     const repo = seed(db);
     expect(repo.list({ kind: "post", tag: "vue" }).total).toBe(2);
     expect(repo.list({ kind: "post", tag: "ts" }).total).toBe(1);
   });
 
   it("统计文章与草稿数量", () => {
-    const db = getDatabase();
     const repo = seed(db);
     const stats = repo.stats();
     expect(stats.totalPosts).toBe(2);
@@ -103,7 +108,6 @@ describe("DocumentRepository", () => {
   });
 
   it("软删除后进入回收站，恢复后回到列表", () => {
-    const db = getDatabase();
     const repo = seed(db);
     const target = repo.findByPath("source/_posts/first-post.md");
     if (!target) throw new Error("missing");
@@ -115,13 +119,11 @@ describe("DocumentRepository", () => {
   });
 
   it("发布趋势返回 6 个月数据", () => {
-    const db = getDatabase();
     const repo = seed(db);
     expect(repo.publishTrend(6)).toHaveLength(6);
   });
 
   it("分类与标签聚合", () => {
-    const db = getDatabase();
     const repo = seed(db);
     expect(repo.categoryDistribution()).toEqual([{ name: "前端", count: 1 }]);
     expect(repo.tagWeights()).toEqual([
@@ -133,7 +135,6 @@ describe("DocumentRepository", () => {
 
 describe("TodoRepository", () => {
   it("增改查删", () => {
-    const db = getDatabase();
     const repo = new TodoRepository(db);
     const todo = repo.create("写文章");
     expect(repo.list()).toHaveLength(1);
@@ -147,7 +148,6 @@ describe("TodoRepository", () => {
 
 describe("SettingRepository", () => {
   it("写入、读取、更新", () => {
-    const db = getDatabase();
     const repo = new SettingRepository(db);
     repo.set("site.title", "博客", "general");
     expect(repo.get("site.title")).toBe("博客");

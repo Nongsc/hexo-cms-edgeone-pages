@@ -14,7 +14,7 @@
     "clean": "pnpm -r exec rm -rf dist dist-edge .turbo 2>/dev/null; echo cleaned"
   },
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.13.0"
   },
   "packageManager": "pnpm@11.7.0"
 }

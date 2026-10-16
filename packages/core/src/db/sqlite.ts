@@ -1,21 +1,27 @@
 /**
  * SQLite 数据访问层（Model）。
  *
- * 运行环境无关：Node 22+ 与 EdgeOne Cloud Functions（Node runtime）均可使用
- * 内置的 `node:sqlite` 模块，因此不需要任何原生编译依赖。
+ * 运行环境适配：
+ *   - Node >= 22.5：使用内置 node:sqlite（同步 API，稳定）
+ *   - Node 20（EdgeOne Cloud Functions 运行时）：使用 sql.js（WASM）
+ *
+ * 上层 Repository 通过 getDatabase() 取得已初始化的数据库实例。
+ * 由于 sql.js 需要异步初始化 WASM，这里提供 ensureDatabase()：
+ * 应用启动时 await 一次，之后 getDatabase() 同步返回。
  */
 
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SqlJsCompatDatabase, type SqliteCompatDatabase } from "./sqljs-adapter";
 
-export interface SqliteOptions {
-  /** 数据库文件路径；`:memory:` 表示内存库（测试用）。 */
-  path?: string;
-}
+/** 统一的数据库接口（node:sqlite 与 sql.js 适配器都实现它）。 */
+export type AppDatabase = DatabaseSync | SqliteCompatDatabase;
 
-let singleton: DatabaseSync | null = null;
+let singleton: AppDatabase | null = null;
+/** 是否使用 sql.js 适配器（Node 20 环境）。 */
+let usingSqlJs = false;
 
 /**
  * 项目根目录（monorepo 根）。
@@ -29,35 +35,104 @@ const PROJECT_ROOT = findProjectRoot(dirname(fileURLToPath(import.meta.url)));
 
 function findProjectRoot(startDir: string): string {
   let dir = startDir;
-  // 向上最多找 10 层，避免异常情况下的死循环
   for (let i = 0; i < 10; i += 1) {
     if (existsSync(resolve(dir, "pnpm-workspace.yaml"))) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  // 兜底：退回到原来的固定推导（packages/core/src/db -> 根）
   return resolve(startDir, "../../../..");
 }
 
-/** 取得进程内唯一的数据库连接（懒初始化 + 建表）。 */
-export function getDatabase(options: SqliteOptions = {}): DatabaseSync {
+/** Node 是否内置可用的 node:sqlite（>= 22.5）。 */
+function hasNativeSqlite(): boolean {
+  const major = Number(process.versions.node.split(".")[0]);
+  const minor = Number(process.versions.node.split(".")[1]);
+  return major > 22 || (major === 22 && minor >= 5);
+}
+
+/** 本地数据库文件路径。 */
+function localDatabasePath(): string {
+  return resolveDatabasePath(process.env.CMS_DB_PATH ?? "apps/api/data/cms.sqlite");
+}
+
+/**
+ * 初始化数据库（幂等）。
+ *
+ * 驱动选择：
+ *   - CMS_DB_DRIVER=sqljs    强制 sql.js（WASM）
+ *   - CMS_DB_DRIVER=native   强制 node:sqlite
+ *   - 未设置：Node >= 22.5 用 node:sqlite，否则 sql.js
+ *     （EdgeOne Cloud Functions 运行时为 Node 20，会自动走 sql.js）
+ */
+export async function ensureDatabase(): Promise<AppDatabase> {
   if (singleton) return singleton;
 
-  const rawPath = options.path ?? process.env.CMS_DB_PATH ?? "apps/api/data/cms.sqlite";
-  const path = resolveDatabasePath(rawPath);
+  const path = localDatabasePath();
+  const driver = process.env.CMS_DB_DRIVER ?? (hasNativeSqlite() ? "native" : "sqljs");
 
-  if (path !== ":memory:") {
-    mkdirSync(dirname(path), { recursive: true });
+  if (driver === "native") {
+    if (path !== ":memory:") {
+      mkdirSync(dirname(path), { recursive: true });
+    }
+    const db = new DatabaseSync(path);
+    db.exec("PRAGMA journal_mode = WAL;");
+    db.exec("PRAGMA foreign_keys = ON;");
+    migrate(db);
+    singleton = db;
+    usingSqlJs = false;
+    return db;
   }
 
-  const db = new DatabaseSync(path);
-  db.exec("PRAGMA journal_mode = WAL;");
-  db.exec("PRAGMA foreign_keys = ON;");
+  // sql.js（WASM）
+  usingSqlJs = true;
+  if (path !== ":memory:" && existsSync(path)) {
+    const bytes = new Uint8Array(readFileSync(path));
+    const db = await SqlJsCompatDatabase.fromBytes(bytes);
+    migrate(db);
+    singleton = db;
+    return db;
+  }
+  const db = await SqlJsCompatDatabase.open();
   migrate(db);
-
   singleton = db;
   return db;
+}
+
+/**
+ * 取得已初始化的数据库。
+ * 必须先 await ensureDatabase()（应用启动时完成）。
+ */
+export function getDatabase(): AppDatabase {
+  if (!singleton) {
+    throw new Error("数据库未初始化：请先 await ensureDatabase()");
+  }
+  return singleton;
+}
+
+/** 是否使用 sql.js 适配器。 */
+export function isUsingSqlJs(): boolean {
+  return usingSqlJs;
+}
+
+/**
+ * 把内存中的数据库导出为文件（sql.js 模式）。
+ * node:sqlite 模式无需调用（本身即文件）。
+ */
+export function persistDatabase(): void {
+  if (!singleton || !usingSqlJs) return;
+  const path = localDatabasePath();
+  if (path === ":memory:") return;
+  const bytes = (singleton as SqlJsCompatDatabase).export();
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, bytes);
+}
+
+/** 测试专用：重置单例，使下一次 ensureDatabase 使用新的路径。 */
+export function resetDatabaseForTesting(): void {
+  singleton?.close();
+  singleton = null;
+  usingSqlJs = false;
 }
 
 /**
@@ -70,12 +145,6 @@ export function resolveDatabasePath(rawPath: string): string {
   if (rawPath === ":memory:") return ":memory:";
   if (isAbsolute(rawPath)) return rawPath;
   return resolve(PROJECT_ROOT, rawPath);
-}
-
-/** 测试专用：重置单例，使下一次 getDatabase 使用新的路径。 */
-export function resetDatabaseForTesting(): void {
-  singleton?.close();
-  singleton = null;
 }
 
 const MIGRATIONS: Array<{ version: number; statements: string[] }> = [
@@ -135,7 +204,7 @@ const MIGRATIONS: Array<{ version: number; statements: string[] }> = [
       `CREATE TABLE IF NOT EXISTS assets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         cos_key TEXT NOT NULL UNIQUE,
-        filename TEXT NOT NULL,
+        filename TEXT NOT NULL DEFAULT '',
         folder TEXT NOT NULL DEFAULT '',
         url TEXT NOT NULL,
         size INTEGER NOT NULL DEFAULT 0,
@@ -167,7 +236,7 @@ const MIGRATIONS: Array<{ version: number; statements: string[] }> = [
   }
 ];
 
-function migrate(db: DatabaseSync): void {
+function migrate(db: AppDatabase): void {
   db.exec(
     `CREATE TABLE IF NOT EXISTS schema_migrations (
       version INTEGER PRIMARY KEY,

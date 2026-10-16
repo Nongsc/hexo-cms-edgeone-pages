@@ -1,6 +1,6 @@
 /** Repository 层：封装 SQLite 访问，向上只暴露领域语义。 */
 
-import { getDatabase } from "../db/sqlite";
+import { getDatabase, type AppDatabase } from "../db/sqlite";
 import type {
   Asset,
   ConfigSnapshot,
@@ -17,7 +17,7 @@ import type {
   Todo
 } from "../types/index";
 import type { SettingGroup } from "../constants/index";
-import type { DatabaseSync, SQLInputValue } from "node:sqlite";
+import type { SQLInputValue } from "node:sqlite";
 
 export interface DocumentRecord {
   kind: DocumentKind;
@@ -132,7 +132,7 @@ function rowToDocument(row: DocumentTableRow): Document {
 }
 
 export class DocumentRepository {
-  constructor(private readonly db: DatabaseSync = getDatabase()) {}
+  constructor(private readonly db: AppDatabase = getDatabase()) {}
 
   insert(input: Omit<DocumentRecord, "repoSha"> & { repoSha?: string | null }): Document {
     const stmt = this.db.prepare(`
@@ -467,7 +467,7 @@ function keyToColumn(key: keyof DocumentRecord): string {
 }
 
 export class TodoRepository {
-  constructor(private readonly db: DatabaseSync = getDatabase()) {}
+  constructor(private readonly db: AppDatabase = getDatabase()) {}
 
   list(): Todo[] {
     const rows = this.db
@@ -539,7 +539,7 @@ export class TodoRepository {
 }
 
 export class DeployLogRepository {
-  constructor(private readonly db: DatabaseSync = getDatabase()) {}
+  constructor(private readonly db: AppDatabase = getDatabase()) {}
 
   list(limit = 20): DeployLog[] {
     const rows = this.db
@@ -643,7 +643,7 @@ export class DeployLogRepository {
 }
 
 export class AssetRepository {
-  constructor(private readonly db: DatabaseSync = getDatabase()) {}
+  constructor(private readonly db: AppDatabase = getDatabase()) {}
 
   create(input: {
     cosKey: string;
@@ -760,7 +760,7 @@ export class AssetRepository {
 }
 
 export class SettingRepository {
-  constructor(private readonly db: DatabaseSync = getDatabase()) {}
+  constructor(private readonly db: AppDatabase = getDatabase()) {}
 
   all(): SettingRow[] {
     const rows = this.db
@@ -814,7 +814,7 @@ export class SettingRepository {
 }
 
 export class UserRepository {
-  constructor(private readonly db: DatabaseSync = getDatabase()) {}
+  constructor(private readonly db: AppDatabase = getDatabase()) {}
 
   findByUsername(username: string): { id: number; username: string; passwordHash: string; displayName: string } | null {
     const row = this.db
@@ -849,7 +849,7 @@ export class UserRepository {
 }
 
 export class ConfigSnapshotRepository {
-  constructor(private readonly db: DatabaseSync = getDatabase()) {}
+  constructor(private readonly db: AppDatabase = getDatabase()) {}
 
   /** 保存快照草稿（upsert）。 */
   save(path: string, content: string, baseSha: string | null): ConfigSnapshot {

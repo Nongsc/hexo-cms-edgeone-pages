@@ -6,8 +6,7 @@ process.env.CMS_DB_PATH = ":memory:";
 process.env.CMS_ADMIN_USERNAME = "admin";
 process.env.CMS_ADMIN_PASSWORD = "admin123456";
 
-const ctx = createContext();
-const app = createApp(ctx);
+let app: ReturnType<typeof createApp>;
 
 async function api(path: string, init?: RequestInit) {
   const response = await app.request(`/api${path}`, init);
@@ -19,6 +18,9 @@ describe("API 集成测试", () => {
   let token = "";
 
   beforeAll(async () => {
+    const ctx = await createContext();
+    app = createApp(ctx);
+
     const login = await api("/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

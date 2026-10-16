@@ -1,10 +1,9 @@
 /**
- * 应用上下文：集中创建 services 与各 Controller，供 Router 装配。
+ * 应用上下文：集中创建 services 与各 Service，供 Router 装配。
  */
 
 import {
   AuthService,
-  ConfigService,
   createServices,
   DashboardService,
   DeployService,
@@ -12,6 +11,7 @@ import {
   ImageService,
   SettingsService,
   ThemeService,
+  ConfigService,
   type ServiceContainer
 } from "@hexo-pro/core";
 
@@ -27,10 +27,11 @@ export interface AppContext {
   theme: ThemeService;
 }
 
-export function createContext(dbPath?: string): AppContext {
+/** 异步创建应用上下文（内部完成数据库初始化）。 */
+export async function createContext(dbPath?: string): Promise<AppContext> {
   if (dbPath) process.env.CMS_DB_PATH = dbPath;
 
-  const services = createServices();
+  const services = await createServices();
   const settings = new SettingsService(services);
   settings.ensureDefaults();
 

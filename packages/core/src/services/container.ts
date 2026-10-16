@@ -1,6 +1,6 @@
 /** 服务容器：集中装配 Repository 与外部客户端，供 Controller 依赖注入。 */
 
-import { getDatabase } from "../db/sqlite";
+import { ensureDatabase, type AppDatabase } from "../db/sqlite";
 import {
   AssetRepository,
   ConfigSnapshotRepository,
@@ -12,10 +12,9 @@ import {
 } from "../repositories/index";
 import { CosClient, type CosConfig } from "./cos";
 import { GitHubClient, type GitHubConfig } from "./github";
-import type { DatabaseSync } from "node:sqlite";
 
 export interface ServiceContainer {
-  db: DatabaseSync;
+  db: AppDatabase;
   documents: DocumentRepository;
   todos: TodoRepository;
   deployLogs: DeployLogRepository;
@@ -27,21 +26,23 @@ export interface ServiceContainer {
   cos: () => CosClient;
 }
 
-export function createServices(db: DatabaseSync = getDatabase()): ServiceContainer {
-  const settings = new SettingRepository(db);
+/** 异步创建服务容器（内部完成数据库初始化）。 */
+export async function createServices(db?: AppDatabase): Promise<ServiceContainer> {
+  const database = db ?? (await ensureDatabase());
+  const settings = new SettingRepository(database);
 
   let githubClient: GitHubClient | null = null;
   let cosClient: CosClient | null = null;
 
   const container: ServiceContainer = {
-    db,
-    documents: new DocumentRepository(db),
-    todos: new TodoRepository(db),
-    deployLogs: new DeployLogRepository(db),
-    assets: new AssetRepository(db),
+    db: database,
+    documents: new DocumentRepository(database),
+    todos: new TodoRepository(database),
+    deployLogs: new DeployLogRepository(database),
+    assets: new AssetRepository(database),
     settings,
-    users: new UserRepository(db),
-    configSnapshots: new ConfigSnapshotRepository(db),
+    users: new UserRepository(database),
+    configSnapshots: new ConfigSnapshotRepository(database),
     github() {
       if (!githubClient) {
         githubClient = new GitHubClient(readGitHubConfig(settings));
