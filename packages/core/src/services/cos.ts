@@ -140,6 +140,22 @@ export class CosClient {
     };
   }
 
+  /**
+   * 下载对象内容（带签名）。
+   *
+   * 注意：不能用 urlForKey() 直接 fetch —— 私有桶的裸 URL 会返回 403，
+   * 必须经过签名。数据库恢复等场景依赖此方法。
+   */
+  async getObject(key: string): Promise<Buffer | null> {
+    this.requireConfigured();
+    const response = await this.signedFetch("GET", `/${encodeKey(key)}`);
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw await this.toError("下载", response);
+    }
+    return Buffer.from(await response.arrayBuffer());
+  }
+
   /** 列出对象（分页）。 */
   async listObjects(prefix = "", maxKeys = 100, marker = ""): Promise<{
     objects: CosObject[];

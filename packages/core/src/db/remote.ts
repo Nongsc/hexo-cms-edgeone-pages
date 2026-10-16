@@ -49,21 +49,13 @@ export class RemoteDatabase {
     this.initialized = true;
 
     try {
-      // COS 上没有数据库时保持空库（首次部署）
-      const { objects } = await this.cos.listObjects(DB_COS_KEY, 1);
-      if (objects.length === 0) return;
+      // 必须用带签名的 getObject：urlForKey() 生成的裸 URL 对私有桶会 403
+      const bytes = await this.cos.getObject(DB_COS_KEY);
+      if (!bytes) return; // COS 上还没有数据库（首次部署），保持空库
 
-      // 下载数据库文件到本地
-      const url = this.cos.urlForKey(DB_COS_KEY);
-      const response = await fetch(url);
-      if (!response.ok) {
-        console.warn(`[remote-db] 下载失败: ${response.status}`);
-        return;
-      }
-      const buffer = Buffer.from(await response.arrayBuffer());
-      writeFileSync(this.localPath, buffer);
+      writeFileSync(this.localPath, bytes);
       this.lastSyncMtimeMs = this.currentMtime();
-      console.log(`[remote-db] 已从 COS 恢复数据库 (${buffer.length} bytes)`);
+      console.log(`[remote-db] 已从 COS 恢复数据库 (${bytes.length} bytes)`);
     } catch (error) {
       console.warn("[remote-db] 初始化失败（将使用本地空库）:", (error as Error).message);
     }

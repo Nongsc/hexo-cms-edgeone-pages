@@ -36,15 +36,18 @@ let builtPromise: Promise<Built> | null = null;
 let built: Built | null = null;
 
 async function build(): Promise<Built> {
-  // 1. 初始化数据库（Node 20 走 sql.js WASM，本地走 node:sqlite）
-  await ensureDatabase();
-
-  // 2. 若启用 COS 持久化，先从 COS 恢复数据库。
-  //    此时 settings 表可能为空，因此 COS 凭据从环境变量读取。
+  // 1. 若启用 COS 持久化，先把数据库文件下载到本地。
+  //    **必须在 ensureDatabase() 之前**：sql.js 是内存库，
+  //    若在加载之后才下载文件，内存中的实例不会感知到该文件。
+  //    此阶段 settings 表为空，COS 凭据只能来自环境变量。
   const remoteDb = createRemoteDb();
   if (remoteDb) {
     await remoteDb.initialize();
   }
+
+  // 2. 初始化数据库（Node 20 走 sql.js WASM 并加载刚下载的文件，
+  //    本地 Node >= 22.5 走 node:sqlite）
+  await ensureDatabase();
 
   // 3. 构建应用上下文与路由
   const ctx = await createContext();

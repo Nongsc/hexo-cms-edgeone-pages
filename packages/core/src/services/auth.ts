@@ -35,15 +35,24 @@ export class AuthService {
     this.options = options;
   }
 
-  /** 首次启动时确保管理员账号存在。 */
+  /**
+   * 确保管理员账号存在且密码与环境变量一致。
+   *
+   * 重要：环境变量是权威来源。若从 COS 恢复的旧库里已有同名 admin
+   * （密码可能是旧值），仅凭 count()===0 判断会导致新密码不生效、
+   * 登录失败。因此这里始终用环境变量的凭据创建或更新。
+   */
   ensureAdminUser(): void {
-    if (this.services.users.count() === 0) {
+    const existing = this.services.users.findByUsername(this.options.username);
+    if (!existing) {
       this.services.users.create(
         this.options.username,
         this.options.password,
         this.options.displayName ?? this.options.username
       );
+      return;
     }
+    this.services.users.updatePassword(this.options.username, this.options.password);
   }
 
   login(username: string, password: string): Session {
