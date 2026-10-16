@@ -1,7 +1,13 @@
 packages:
   - "packages/*"
   - "apps/*"
+
+# 允许这些依赖执行安装后构建脚本。
+# pnpm 11 起默认禁止依赖的 postinstall，并因「Ignored build scripts」
+# 返回非零退出码，导致 CI 的 `pnpm install` 失败（exit code 1）。
+# 该配置必须写在 pnpm-workspace.yaml（.npmrc 与 package.json 的 pnpm 字段
+# 在 pnpm 11 中均已不再读取）。
 allowBuilds:
-  '@parcel/watcher': set this to true or false
-  esbuild: set this to true or false
-  vue-demi: set this to true or false
+  '@parcel/watcher': true
+  esbuild: true
+  vue-demi: true
