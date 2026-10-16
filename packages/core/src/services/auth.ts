@@ -5,7 +5,7 @@
  * 通过环境变量注入初始管理员账号。
  */
 
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { ServiceContainer } from "./container";
 import { ValidationError } from "./document";
 
@@ -17,7 +17,6 @@ export interface Session {
 }
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const sessions = new Map<string, Session>();
 
 export interface AuthServiceOptions {
   username: string;
@@ -63,29 +62,30 @@ export class AuthService {
     return this.createSession(user.username, user.displayName);
   }
 
-  logout(token: string): void {
-    sessions.delete(token);
+  logout(_token: string): void {
+    // 无状态 token：服务端不保存会话，登出由前端丢弃 token 完成。
+    // 这里保留方法以兼容现有调用方。
   }
 
   verify(token: string | undefined): Session | null {
     if (!token) return null;
-    const session = sessions.get(token);
-    if (!session) return null;
-    if (session.expiresAt < Date.now()) {
-      sessions.delete(token);
+    try {
+      const session = decodeSession(token, this.options.password);
+      if (session.expiresAt < Date.now()) return null;
+      return session;
+    } catch {
       return null;
     }
-    return session;
   }
 
   private createSession(username: string, displayName: string): Session {
     const session: Session = {
-      token: randomUUID(),
+      token: "",
       username,
       displayName,
       expiresAt: Date.now() + SESSION_TTL_MS
     };
-    sessions.set(session.token, session);
+    session.token = encodeSession(session, this.options.password);
     return session;
   }
 
@@ -93,6 +93,50 @@ export class AuthService {
   signPayload(payload: string): string {
     return createHmac("sha256", this.options.password).update(payload).digest("hex");
   }
+}
+
+/**
+ * 无状态 session token：payload 用 HMAC 签名，验证时不依赖服务端存储。
+ * 这是关键——Cloud Functions 是多实例、无状态的，登录请求与后续请求
+ * 可能落在不同实例，内存 Map 会导致「登录成功但马上 401 被踢回登录页」。
+ *
+ * token 格式：base64url(payload).base64url(hmac_signature)
+ */
+function encodeSession(session: Session, secret: string): string {
+  const payload = Buffer.from(
+    JSON.stringify({
+      username: session.username,
+      displayName: session.displayName,
+      expiresAt: session.expiresAt
+    }),
+    "utf8"
+  ).toString("base64url");
+  const signature = createHmac("sha256", secret).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function decodeSession(token: string, secret: string): Session {
+  const dot = token.lastIndexOf(".");
+  if (dot <= 0) throw new Error("invalid token");
+  const payload = token.slice(0, dot);
+  const signature = token.slice(dot + 1);
+
+  const expected = createHmac("sha256", secret).update(payload).digest("base64url");
+  if (!timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    throw new Error("invalid signature");
+  }
+
+  const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
+    username: string;
+    displayName: string;
+    expiresAt: number;
+  };
+  return {
+    token,
+    username: data.username,
+    displayName: data.displayName,
+    expiresAt: data.expiresAt
+  };
 }
 
 function safeEqual(a: string, b: string): boolean {

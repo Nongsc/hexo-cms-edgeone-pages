@@ -10988,9 +10988,8 @@ var DeployService = class {
 };
 
 // packages/core/src/services/auth.ts
-import { createHmac as createHmac2, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHmac as createHmac2, timingSafeEqual } from "node:crypto";
 var SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
-var sessions = /* @__PURE__ */ new Map();
 var AuthService = class {
   constructor(services, options2) {
     this.services = services;
@@ -11024,27 +11023,26 @@ var AuthService = class {
     }
     return this.createSession(user.username, user.displayName);
   }
-  logout(token) {
-    sessions.delete(token);
+  logout(_token) {
   }
   verify(token) {
     if (!token) return null;
-    const session = sessions.get(token);
-    if (!session) return null;
-    if (session.expiresAt < Date.now()) {
-      sessions.delete(token);
+    try {
+      const session = decodeSession(token, this.options.password);
+      if (session.expiresAt < Date.now()) return null;
+      return session;
+    } catch {
       return null;
     }
-    return session;
   }
   createSession(username, displayName) {
     const session = {
-      token: randomUUID(),
+      token: "",
       username,
       displayName,
       expiresAt: Date.now() + SESSION_TTL_MS
     };
-    sessions.set(session.token, session);
+    session.token = encodeSession(session, this.options.password);
     return session;
   }
   /** 生成简单的请求签名，用于 CI Webhook 校验。 */
@@ -11052,6 +11050,35 @@ var AuthService = class {
     return createHmac2("sha256", this.options.password).update(payload).digest("hex");
   }
 };
+function encodeSession(session, secret) {
+  const payload = Buffer.from(
+    JSON.stringify({
+      username: session.username,
+      displayName: session.displayName,
+      expiresAt: session.expiresAt
+    }),
+    "utf8"
+  ).toString("base64url");
+  const signature = createHmac2("sha256", secret).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+function decodeSession(token, secret) {
+  const dot = token.lastIndexOf(".");
+  if (dot <= 0) throw new Error("invalid token");
+  const payload = token.slice(0, dot);
+  const signature = token.slice(dot + 1);
+  const expected = createHmac2("sha256", secret).update(payload).digest("base64url");
+  if (!timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    throw new Error("invalid signature");
+  }
+  const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  return {
+    token,
+    username: data.username,
+    displayName: data.displayName,
+    expiresAt: data.expiresAt
+  };
+}
 function safeEqual(a, b) {
   const bufferA = Buffer.from(a, "utf8");
   const bufferB = Buffer.from(b, "utf8");
