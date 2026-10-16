@@ -5699,8 +5699,14 @@ var DEFAULT_SETTINGS = {
   "deploy.publishDir": "public"
 };
 
+// apps/api/src/node-sqlite-stub.ts
+var DatabaseSync = class {
+  constructor(_path) {
+    throw new Error("[stub] node:sqlite \u4E0D\u53EF\u7528\uFF0C\u5E94\u4F7F\u7528 sql.js \u9A71\u52A8\uFF08CMS_DB_DRIVER=sqljs\uFF09");
+  }
+};
+
 // packages/core/src/db/sqlite.ts
-import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

@@ -7,10 +7,7 @@
   "outputDirectory": "apps/web/dist",
   "cloudFunctions": {
     "maxDuration": 60,
-    "nodejs": {
-      "externalNodeModules": ["sql.js"],
-      "includeFiles": ["apps/api/data/**"]
-    }
+    "includeFiles": ["apps/api/data/**"]
   },
   "rewrites": [
     {

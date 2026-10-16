@@ -38,12 +38,16 @@ await build({
   minify: false,
   sourcemap: false,
   absWorkingDir: root,
-  // Cloud Functions 运行在完整 Node 环境：
-  //  - node: 内置模块由运行时提供（external）
-  //  - sql.js 使用 inline 构建（wasm 以 base64 内联），需打进 bundle：
-  //    部署环境只上传函数目录，若 external 会因找不到 node_modules 而失败。
+  // Cloud Functions 运行在完整 Node 环境（Node 20）：
+  //  - 普通 node:* 内置模块由运行时提供（external）
+  //  - node:sqlite 在 Node 20 不存在，且 EdgeOne 会二次打包本 bundle，
+  //    遇到 node:sqlite 会报 "Could not resolve sqlite"。因此用 alias 把
+  //    node:sqlite 指向 stub（运行时 Node 20 走 sql.js 分支，不会真正调用）。
+  //  - sql.js 使用 inline 构建（wasm base64 内联），打进 bundle，无需 external。
+  alias: {
+    "node:sqlite": resolve(apiDir, "src/node-sqlite-stub.ts")
+  },
   external: [
-    "node:sqlite",
     "node:crypto",
     "node:fs",
     "node:path",
