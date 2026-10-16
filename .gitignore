@@ -11,8 +11,9 @@ dev-dist
 apps/api/dist-edge
 *.tsbuildinfo
 
-# EdgeOne Cloud Functions 构建产物（由 build:edge 生成）
-cloud-functions
+# 注意：cloud-functions/ 是 EdgeOne 的函数入口目录，必须提交到仓库。
+# EdgeOne 在代码仓库里扫描该目录生成函数路由；若被 gitignore，
+# 部署时会出现「No server-handler detected」，/api/* 全被 SPA 回退拦截。
 
 # 日志
 *.log
