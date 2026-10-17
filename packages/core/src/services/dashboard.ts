@@ -2,6 +2,7 @@
 
 import type { ServiceContainer } from "./container";
 import { GitHubError } from "./github";
+import yaml from "js-yaml";
 
 export interface DashboardData {
   /** 第一层：速览状态。 */
@@ -43,16 +44,16 @@ export class DashboardService {
 
   async load(): Promise<DashboardData> {
     const stats = this.services.documents.stats();
-    const theme = this.services.settings.get("site.theme") || "landscape";
+    const siteInfo = await this.readSiteInfo();
 
     return {
       quick: {
         hexoVersion: await this.readHexoVersion(),
-        theme,
+        theme: siteInfo.theme || "landscape",
         lastPushAt: await this.readLastPushAt(),
         pluginCount: await this.countPlugins(),
         totalPosts: stats.totalPosts,
-        blogUrl: this.services.settings.get("site.url") || ""
+        blogUrl: siteInfo.url
       },
       cards: {
         monthNew: stats.publishedThisMonth,
@@ -70,6 +71,22 @@ export class DashboardService {
         todos: this.services.todos.list()
       }
     };
+  }
+
+  /** 从 _config.yml 读取站点信息（theme / url），用于顶部状态与博客前台跳转。 */
+  private async readSiteInfo(): Promise<{ theme: string; url: string }> {
+    if (!this.services.settings.get("github.token")) {
+      return { theme: this.services.settings.get("site.theme") || "", url: this.services.settings.get("site.url") || "" };
+    }
+    try {
+      const file = await this.services.github().getFile("_config.yml");
+      if (!file) return { theme: "", url: "" };
+      const parsed = yaml.load(file.content) as Record<string, unknown> | undefined;
+      const str = (value: unknown): string => (typeof value === "string" ? value : "");
+      return { theme: str(parsed?.theme), url: str(parsed?.url) };
+    } catch {
+      return { theme: "", url: "" };
+    }
   }
 
   /** 从 package.json 读取 Hexo 版本。 */

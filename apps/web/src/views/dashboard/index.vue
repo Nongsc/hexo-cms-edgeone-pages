@@ -98,11 +98,14 @@
               style="width: 100%; height: 280px"
               :words="tagWords"
               :color="tagColor"
-              font-family="Roboto, 'Microsoft YaHei', sans-serif"
+              font-family="'Finger Paint', 'Microsoft YaHei', sans-serif"
               :font-size-ratio="6"
               :spacing="0.3"
-              :rotation="([, weight]) => (weight > 4 ? 0 : 1)"
+              :rotation="tagRotation"
               rotation-unit="turn"
+              :enter-animation="tagEnterAnimation"
+              :leave-animation="tagLeaveAnimation"
+              :animation-duration="1000"
             />
             <el-empty v-else description="暂无标签" :image-size="60" />
           </div>
@@ -124,13 +127,8 @@
             <el-empty v-if="(data?.charts.recentPosts ?? []).length === 0" description="暂无文章" :image-size="60" />
           </ul>
         </el-card>
-      </el-col>
-    </el-row>
 
-    <!-- 第四层：待办事项与系统信息 -->
-    <el-row :gutter="16" class="chart-row">
-      <el-col :xs="24" :md="10">
-        <el-card shadow="never">
+        <el-card shadow="never" class="todo-card">
           <template #header>
             <div class="card-header">
               <span class="card-title">待办事项</span>
@@ -148,20 +146,6 @@
             </div>
             <el-empty v-if="(data?.detail.todos ?? []).length === 0" description="暂无待办" :image-size="60" />
           </div>
-        </el-card>
-      </el-col>
-
-      <el-col :xs="24" :md="14">
-        <el-card shadow="never">
-          <template #header><span class="card-title">系统信息</span></template>
-          <el-descriptions :column="2" border>
-            <el-descriptions-item label="Hexo 版本">{{ data?.quick.hexoVersion || "-" }}</el-descriptions-item>
-            <el-descriptions-item label="主题">{{ data?.quick.theme || "-" }}</el-descriptions-item>
-            <el-descriptions-item label="上次推送">{{ formatTime(data?.quick.lastPushAt) }}</el-descriptions-item>
-            <el-descriptions-item label="插件状态">
-              {{ data?.quick.pluginCount ?? 0 }} 个已安装
-            </el-descriptions-item>
-          </el-descriptions>
         </el-card>
       </el-col>
     </el-row>
@@ -209,13 +193,16 @@ const todoTitle = ref("");
 /** 标签云数据：转为 VueWordCloud 需要的 [text, weight] 数组。 */
 const tagWords = computed(() => (data.value?.charts.tags ?? []).map((tag) => [tag.name, tag.weight] as [string, number]));
 
-/** 标签云颜色：按权重着色。 */
-const tagColor = ([, weight]: [string, number]): string => {
-  if (weight >= 8) return "#f56c6c";
-  if (weight >= 5) return "#e6a23c";
-  if (weight >= 3) return "#409eff";
-  return "#909399";
-};
+/** 标签云颜色：demo 最后一个色板（金黄/青/蓝/红/深紫），随机取色。 */
+const TAG_COLORS = ["#ffd077", "#3bc4c7", "#3a9eea", "#ff4e69", "#461e47"];
+const tagColor = (): string => TAG_COLORS[Math.floor(Math.random() * TAG_COLORS.length)];
+
+/** 标签云旋转：十字（一半水平 0，一半垂直 3/4 turn = 90° 竖排）。 */
+const tagRotation = (): number => (Math.random() < 0.5 ? 0 : 3 / 4);
+
+/** 标签云淡入淡出动画（opacity 过渡）。 */
+const tagEnterAnimation = { opacity: 0 };
+const tagLeaveAnimation = { opacity: 0 };
 
 async function loadData(): Promise<void> {
   loading.value = true;
@@ -495,6 +482,10 @@ onBeforeUnmount(() => {
     flex-shrink: 0;
     margin-left: 12px;
   }
+}
+
+.todo-card {
+  margin-top: 16px;
 }
 
 .todo-list {

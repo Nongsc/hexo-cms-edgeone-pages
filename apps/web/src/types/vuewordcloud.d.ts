@@ -16,6 +16,8 @@ declare module "vuewordcloud" {
     animationDuration?: number;
     animationEasing?: string;
     animationOverlap?: number;
+    enterAnimation?: Record<string, unknown> | string;
+    leaveAnimation?: Record<string, unknown> | string;
   }>;
 
   export default VueWordCloud;
