@@ -98,7 +98,7 @@
               style="width: 100%; height: 280px"
               :words="tagWords"
               :color="tagColor"
-              font-family="'Finger Paint', 'Microsoft YaHei', sans-serif"
+              :font-family="tagFontFamily"
               :font-size-ratio="6"
               :spacing="0.3"
               :rotation="tagRotation"
@@ -196,6 +196,12 @@ const tagWords = computed(() => (data.value?.charts.tags ?? []).map((tag) => [ta
 /** 标签云颜色：demo 最后一个色板（金黄/青/蓝/红/深紫），随机取色。 */
 const TAG_COLORS = ["#ffd077", "#3bc4c7", "#3a9eea", "#ff4e69", "#461e47"];
 const tagColor = (): string => TAG_COLORS[Math.floor(Math.random() * TAG_COLORS.length)];
+
+/** 标签云字体：按单个标签区分——含中文用微软雅黑，纯英文用 Finger Paint。 */
+const tagFontFamily = ([text]: [string, number]): string =>
+  /[\u4e00-\u9fff\u3400-\u4dbf]/.test(text)
+    ? "'Microsoft YaHei', 'PingFang SC', sans-serif"
+    : "'Finger Paint', cursive";
 
 /** 标签云旋转：十字（一半水平 0，一半垂直 3/4 turn = 90° 竖排）。 */
 const tagRotation = (): number => (Math.random() < 0.5 ? 0 : 3 / 4);
