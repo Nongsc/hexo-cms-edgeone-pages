@@ -85,12 +85,6 @@ export const asyncRoutes: RouteRecordRaw[] = [
         meta: { title: "设置", icon: "Tools" }
       },
       {
-        path: "deploy",
-        name: "Deploy",
-        component: () => import("@/views/system/deploy.vue"),
-        meta: { title: "部署", icon: "Position" }
-      },
-      {
         path: "config",
         name: "YamlConfig",
         component: () => import("@/views/system/config.vue"),

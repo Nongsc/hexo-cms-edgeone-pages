@@ -5,7 +5,6 @@
       <div class="quick-actions">
         <el-button type="primary" :icon="EditPen" @click="router.push('/content/editor/new?kind=post')">新建文章</el-button>
         <el-button :icon="Document" @click="goDrafts">草稿箱</el-button>
-        <el-button :icon="Position" :loading="deploying" @click="handleDeploy">部署</el-button>
         <el-button :icon="Link" @click="openBlog">博客前台</el-button>
         <el-button :icon="Refresh" @click="loadData">刷新</el-button>
       </div>
@@ -19,11 +18,11 @@
           <span class="status-value">{{ data?.quick.theme || "-" }}</span>
         </div>
         <div class="status-item">
-          <span class="status-label">上次部署</span>
-          <span class="status-value">{{ formatTime(data?.quick.lastDeployAt) }}</span>
+          <span class="status-label">上次推送</span>
+          <span class="status-value">{{ formatTime(data?.quick.lastPushAt) }}</span>
         </div>
         <div class="status-item">
-          <span class="status-label">启用插件</span>
+          <span class="status-label">安装插件</span>
           <span class="status-value">{{ data?.quick.pluginCount ?? 0 }}</span>
         </div>
         <div class="status-item">
@@ -94,17 +93,18 @@
         <el-card shadow="never">
           <template #header><span class="card-title">标签云</span></template>
           <div class="tag-cloud">
-            <el-tag
-              v-for="tag in data?.charts.tags ?? []"
-              :key="tag.name"
-              :size="tagSize(tag.weight)"
-              class="tag-item"
-              effect="plain"
-              round
-            >
-              {{ tag.name }} · {{ tag.weight }}
-            </el-tag>
-            <el-empty v-if="(data?.charts.tags ?? []).length === 0" description="暂无标签" :image-size="60" />
+            <vue-word-cloud
+              v-if="tagWords.length > 0"
+              style="width: 100%; height: 280px"
+              :words="tagWords"
+              :color="tagColor"
+              font-family="Roboto, 'Microsoft YaHei', sans-serif"
+              :font-size-ratio="6"
+              :spacing="0.3"
+              :rotation="([, weight]) => (weight > 4 ? 0 : 1)"
+              rotation-unit="turn"
+            />
+            <el-empty v-else description="暂无标签" :image-size="60" />
           </div>
         </el-card>
       </el-col>
@@ -127,7 +127,7 @@
       </el-col>
     </el-row>
 
-    <!-- 第四层：待办事项与部署信息 -->
+    <!-- 第四层：待办事项与系统信息 -->
     <el-row :gutter="16" class="chart-row">
       <el-col :xs="24" :md="10">
         <el-card shadow="never">
@@ -157,27 +157,11 @@
           <el-descriptions :column="2" border>
             <el-descriptions-item label="Hexo 版本">{{ data?.quick.hexoVersion || "-" }}</el-descriptions-item>
             <el-descriptions-item label="主题">{{ data?.quick.theme || "-" }}</el-descriptions-item>
-            <el-descriptions-item label="上次部署">{{ formatTime(data?.quick.lastDeployAt) }}</el-descriptions-item>
+            <el-descriptions-item label="上次推送">{{ formatTime(data?.quick.lastPushAt) }}</el-descriptions-item>
             <el-descriptions-item label="插件状态">
-              {{ data?.quick.pluginCount ?? 0 }} 个已启用
+              {{ data?.quick.pluginCount ?? 0 }} 个已安装
             </el-descriptions-item>
           </el-descriptions>
-        </el-card>
-
-        <el-card shadow="never" class="deploy-card">
-          <template #header><span class="card-title">部署日志</span></template>
-          <el-timeline>
-            <el-timeline-item
-              v-for="log in data?.detail.deployLogs ?? []"
-              :key="log.id"
-              :type="logStatusType(log.status)"
-              :timestamp="formatTime(log.createdAt)"
-            >
-              <span class="deploy-channel">{{ channelLabel(log.channel) }}</span>
-              <span class="deploy-message">{{ log.message }}</span>
-            </el-timeline-item>
-            <el-empty v-if="(data?.detail.deployLogs ?? []).length === 0" description="暂无部署记录" :image-size="60" />
-          </el-timeline>
         </el-card>
       </el-col>
     </el-row>
@@ -194,25 +178,24 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
-import { EditPen, Document, Position, Link, Refresh, Plus, Edit, List, Files, Delete } from "@element-plus/icons-vue";
+import { EditPen, Document, Link, Refresh, Plus, Edit, List, Files, Delete } from "@element-plus/icons-vue";
 import * as echarts from "echarts/core";
 import { LineChart, PieChart } from "echarts/charts";
 import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
+import VueWordCloud from "vuewordcloud";
 import { getDashboard } from "@/api";
 import { createTodo, deleteTodo, updateTodo } from "@/api/todos";
-import { triggerDeploy } from "@/api/system";
 import { confirm } from "@/utils/http";
-import type { DashboardData, DeployStatus } from "@/api/types";
+import type { DashboardData } from "@/api/types";
 
 echarts.use([LineChart, PieChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent, CanvasRenderer]);
 
 const router = useRouter();
 const loading = ref(false);
-const deploying = ref(false);
 const data = ref<DashboardData | null>(null);
 
 const trendRef = ref<HTMLDivElement>();
@@ -222,6 +205,17 @@ let categoryChart: echarts.ECharts | null = null;
 
 const todoDialogVisible = ref(false);
 const todoTitle = ref("");
+
+/** 标签云数据：转为 VueWordCloud 需要的 [text, weight] 数组。 */
+const tagWords = computed(() => (data.value?.charts.tags ?? []).map((tag) => [tag.name, tag.weight] as [string, number]));
+
+/** 标签云颜色：按权重着色。 */
+const tagColor = ([, weight]: [string, number]): string => {
+  if (weight >= 8) return "#f56c6c";
+  if (weight >= 5) return "#e6a23c";
+  if (weight >= 3) return "#409eff";
+  return "#909399";
+};
 
 async function loadData(): Promise<void> {
   loading.value = true;
@@ -279,31 +273,9 @@ function renderCharts(): void {
   }
 }
 
-function tagSize(weight: number): "large" | "default" | "small" {
-  if (weight >= 5) return "large";
-  if (weight >= 2) return "default";
-  return "small";
-}
-
 function formatTime(value?: string | null): string {
   if (!value) return "-";
   return value.replace("T", " ").slice(0, 16);
-}
-
-function logStatusType(status: DeployStatus): "primary" | "success" | "warning" | "danger" | "info" {
-  if (status === "success") return "success";
-  if (status === "failed") return "danger";
-  if (status === "running" || status === "pending") return "warning";
-  return "info";
-}
-
-function channelLabel(channel: string): string {
-  const labels: Record<string, string> = {
-    "edgeone-pages": "EdgeOne Pages",
-    "github-pages": "GitHub Pages",
-    "cloudflare-pages": "Cloudflare Pages"
-  };
-  return labels[channel] ?? channel;
 }
 
 function goDrafts(): void {
@@ -318,20 +290,6 @@ function openBlog(): void {
 
 function openPost(id: number): void {
   router.push(`/content/editor/${id}`);
-}
-
-async function handleDeploy(): Promise<void> {
-  if (!(await confirm("将触发一次站点构建与发布，确认继续？", "部署确认"))) return;
-  deploying.value = true;
-  try {
-    const log = await triggerDeploy("edgeone-pages");
-    ElMessage.success(log.message);
-    await loadData();
-  } catch (error) {
-    ElMessage.error((error as Error).message);
-  } finally {
-    deploying.value = false;
-  }
 }
 
 async function addTodo(): Promise<void> {
@@ -496,10 +454,9 @@ onBeforeUnmount(() => {
 
 .tag-cloud {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-height: 60px;
+  min-height: 280px;
   align-items: center;
+  justify-content: center;
 }
 
 .recent-list {
@@ -571,19 +528,5 @@ onBeforeUnmount(() => {
   &:hover .todo-delete {
     visibility: visible;
   }
-}
-
-.deploy-card {
-  margin-top: 16px;
-}
-
-.deploy-channel {
-  font-weight: 600;
-  margin-right: 8px;
-}
-
-.deploy-message {
-  font-size: 13px;
-  color: #4e5969;
 }
 </style>

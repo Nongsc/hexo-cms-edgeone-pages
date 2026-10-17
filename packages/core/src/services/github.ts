@@ -127,6 +127,36 @@ export class GitHubClient {
     );
   }
 
+  /**
+   * 列出分支最近提交（默认最近 1 条）。
+   * 返回提交的 sha、提交时间与提交者信息，用于「上次推送时间」等展示。
+   */
+  async listCommits(perPage = 1): Promise<
+    Array<{
+      sha: string;
+      message: string;
+      committedAt: string | null;
+      authorName: string;
+    }>
+  > {
+    const data = await this.request<
+      Array<{
+        sha: string;
+        commit: {
+          message: string;
+          author: { name: string; date: string | null };
+          committer: { name: string; date: string | null };
+        };
+      }>
+    >(`/commits?per_page=${perPage}&sha=${encodeURIComponent(this.config.branch)}`);
+    return data.map((item) => ({
+      sha: item.sha,
+      message: item.commit.message,
+      committedAt: item.commit.committer?.date ?? item.commit.author?.date ?? null,
+      authorName: item.commit.committer?.name ?? item.commit.author?.name ?? ""
+    }));
+  }
+
   /** 读取单个文件内容。不存在时返回 null。 */
   async getFile(path: string): Promise<GitHubContent | null> {
     try {

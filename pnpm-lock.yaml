@@ -98,6 +98,9 @@ importers:
       vue-types:
         specifier: ^7.0.0
         version: 7.0.0(vue@3.5.44(typescript@5.7.2))
+      vuewordcloud:
+        specifier: ^19.0.0
+        version: 19.0.0(vue@3.5.44(typescript@5.7.2))
     devDependencies:
       '@types/js-cookie':
         specifier: ^3.0.6
@@ -1569,6 +1572,11 @@ packages:
       typescript:
         optional: true
 
+  vuewordcloud@19.0.0:
+    resolution: {integrity: sha512-DgvvtatvU+lp1Crb7s+KbjvO/ULJLc43jce/mUY31bHireqeIHKaZ9PeXRfAy0rMcZi8EURnGK0ZPWoJBDRUhw==}
+    peerDependencies:
+      vue: ^3
+
   webpack-virtual-modules@0.6.2:
     resolution: {integrity: sha512-66/V2i5hQanC51vBQKPH4aI8NMAcBW59FVBs+rC7eGHupMyfn34q7rZIE+ETlJ+XTevqfUhVVBgSUNSW2flEUQ==}
 
@@ -2872,6 +2880,10 @@ snapshots:
       '@vue/shared': 3.5.44
     optionalDependencies:
       typescript: 5.7.2
+
+  vuewordcloud@19.0.0(vue@3.5.44(typescript@5.7.2)):
+    dependencies:
+      vue: 3.5.44(typescript@5.7.2)
 
   webpack-virtual-modules@0.6.2: {}
 

@@ -898,3 +898,44 @@ export class ConfigSnapshotRepository {
   }
 }
 
+/** 配置镜像缓存：YAML 配置内容在数据库保留一份（GitHub 内容的本地镜像）。 */
+export class ConfigCacheRepository {
+  constructor(private readonly db: AppDatabase = getDatabase()) {}
+
+  /** 保存 / 更新镜像（upsert）。 */
+  save(path: string, content: string, baseSha: string | null): void {
+    this.db
+      .prepare(
+        `INSERT INTO config_cache (path, content, base_sha, updated_at)
+         VALUES (?, ?, ?, datetime('now'))
+         ON CONFLICT(path) DO UPDATE SET
+           content = excluded.content,
+           base_sha = excluded.base_sha,
+           updated_at = datetime('now')`
+      )
+      .run(path, content, baseSha);
+  }
+
+  /** 读取镜像；不存在返回 null。 */
+  get(path: string): { path: string; content: string; baseSha: string | null; updatedAt: string } | null {
+    const row = this.db
+      .prepare("SELECT path, content, base_sha, updated_at FROM config_cache WHERE path = ?")
+      .get(path) as
+      | { path: string; content: string; base_sha: string | null; updated_at: string }
+      | undefined;
+    return row
+      ? {
+          path: row.path,
+          content: row.content,
+          baseSha: row.base_sha,
+          updatedAt: row.updated_at
+        }
+      : null;
+  }
+
+  /** 删除镜像（配置删除时调用）。 */
+  remove(path: string): void {
+    this.db.prepare("DELETE FROM config_cache WHERE path = ?").run(path);
+  }
+}
+

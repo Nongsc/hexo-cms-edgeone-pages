@@ -7,6 +7,16 @@ import { fail, messageOfError, ok, statusOfError } from "./response";
 export class ConfigController {
   constructor(private readonly ctx: AppContext) {}
 
+  /** 站点信息（只读）：从 _config.yml 解析 theme/title/url/description。 */
+  siteInfo = async (c: Context) => {
+    try {
+      const info = await this.ctx.config.readSiteInfo();
+      return c.json(ok(info));
+    } catch (error) {
+      return c.json(fail(messageOfError(error), statusOfError(error)), statusOfError(error) as 400);
+    }
+  };
+
   /** 配置文件列表。 */
   list = async (c: Context) => {
     try {

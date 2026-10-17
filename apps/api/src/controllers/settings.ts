@@ -1,8 +1,7 @@
-/** SettingsController：系统管理（设置 / 部署 / 主题 / YAML 配置 / 账号）。 */
+/** SettingsController：系统管理（设置 / 主题 / YAML 配置 / 账号）。 */
 
 import type { Context } from "hono";
 import type { AppContext } from "../context";
-import type { DeployChannel } from "@hexo-pro/core";
 import { fail, messageOfError, ok, statusOfError } from "./response";
 
 export class SettingsController {
@@ -30,21 +29,6 @@ export class SettingsController {
     return c.json(ok(await this.ctx.settings.testCos()));
   };
 
-  deployChannels = async (c: Context) => {
-    return c.json(ok(this.ctx.settings.deployChannels()));
-  };
-
-  deployList = async (c: Context) => {
-    return c.json(ok(this.ctx.deploy.list()));
-  };
-
-  deployTrigger = async (c: Context) => {
-    const body = await c.req.json<{ channel?: DeployChannel }>();
-    const channel = body.channel ?? "edgeone-pages";
-    const log = await this.ctx.deploy.trigger(channel);
-    return c.json(ok(log, log.status === "success" ? "部署已触发" : log.message));
-  };
-
   account = async (c: Context) => {
     return c.json(ok(this.ctx.settings.account()));
   };
@@ -68,12 +52,5 @@ export class SettingsController {
     } catch (error) {
       return c.json(fail(messageOfError(error), statusOfError(error)), statusOfError(error) as 400);
     }
-  };
-
-  saveDeploy = async (c: Context) => {
-    const body = await c.req.json<{ channel?: DeployChannel; config?: Record<string, string> }>();
-    if (!body.channel) return c.json(fail("缺少 channel", 422), 422);
-    this.ctx.settings.saveDeploy(body.channel, body.config ?? {});
-    return c.json(ok(null, "部署配置已保存"));
   };
 }

@@ -5989,6 +5989,20 @@ var MIGRATIONS = [
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );`
     ]
+  },
+  {
+    version: 3,
+    statements: [
+      // 配置镜像缓存：YAML 配置内容在数据库保留一份，
+      // 读取 GitHub 后缓存，GitHub 不可用时作为回退来源。
+      `CREATE TABLE IF NOT EXISTS config_cache (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT NOT NULL UNIQUE,
+        content TEXT NOT NULL,
+        base_sha TEXT,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );`
+    ]
   }
 ];
 function migrate(db) {
@@ -6945,6 +6959,37 @@ var ConfigSnapshotRepository = class {
   /** 删除快照草稿（发布成功后调用）。 */
   remove(path) {
     this.db.prepare("DELETE FROM config_snapshots WHERE path = ?").run(path);
+  }
+};
+var ConfigCacheRepository = class {
+  constructor(db = getDatabase()) {
+    this.db = db;
+  }
+  db;
+  /** 保存 / 更新镜像（upsert）。 */
+  save(path, content, baseSha) {
+    this.db.prepare(
+      `INSERT INTO config_cache (path, content, base_sha, updated_at)
+         VALUES (?, ?, ?, datetime('now'))
+         ON CONFLICT(path) DO UPDATE SET
+           content = excluded.content,
+           base_sha = excluded.base_sha,
+           updated_at = datetime('now')`
+    ).run(path, content, baseSha);
+  }
+  /** 读取镜像；不存在返回 null。 */
+  get(path) {
+    const row = this.db.prepare("SELECT path, content, base_sha, updated_at FROM config_cache WHERE path = ?").get(path);
+    return row ? {
+      path: row.path,
+      content: row.content,
+      baseSha: row.base_sha,
+      updatedAt: row.updated_at
+    } : null;
+  }
+  /** 删除镜像（配置删除时调用）。 */
+  remove(path) {
+    this.db.prepare("DELETE FROM config_cache WHERE path = ?").run(path);
   }
 };
 
@@ -10158,6 +10203,19 @@ var GitHubClient = class {
       `/branches/${encodeURIComponent(this.config.branch)}`
     );
   }
+  /**
+   * 列出分支最近提交（默认最近 1 条）。
+   * 返回提交的 sha、提交时间与提交者信息，用于「上次推送时间」等展示。
+   */
+  async listCommits(perPage = 1) {
+    const data = await this.request(`/commits?per_page=${perPage}&sha=${encodeURIComponent(this.config.branch)}`);
+    return data.map((item) => ({
+      sha: item.sha,
+      message: item.commit.message,
+      committedAt: item.commit.committer?.date ?? item.commit.author?.date ?? null,
+      authorName: item.commit.committer?.name ?? item.commit.author?.name ?? ""
+    }));
+  }
   /** 读取单个文件内容。不存在时返回 null。 */
   async getFile(path) {
     try {
@@ -10305,6 +10363,7 @@ async function createServices(db) {
     settings,
     users: new UserRepository(database),
     configSnapshots: new ConfigSnapshotRepository(database),
+    configCache: new ConfigCacheRepository(database),
     github() {
       if (!githubClient) {
         githubClient = new GitHubClient(readGitHubConfig(settings));
@@ -10712,13 +10771,12 @@ var DashboardService = class {
   services;
   async load() {
     const stats = this.services.documents.stats();
-    const lastDeploy = this.services.deployLogs.latest();
     const theme = this.services.settings.get("site.theme") || "landscape";
     return {
       quick: {
         hexoVersion: await this.readHexoVersion(),
         theme,
-        lastDeployAt: lastDeploy?.finishedAt ?? lastDeploy?.createdAt ?? null,
+        lastPushAt: await this.readLastPushAt(),
         pluginCount: await this.countPlugins(),
         totalPosts: stats.totalPosts,
         blogUrl: this.services.settings.get("site.url") || ""
@@ -10736,8 +10794,7 @@ var DashboardService = class {
         recentPosts: this.services.documents.recentPosts(5)
       },
       detail: {
-        todos: this.services.todos.list(),
-        deployLogs: this.services.deployLogs.list(20)
+        todos: this.services.todos.list()
       }
     };
   }
@@ -10755,17 +10812,35 @@ var DashboardService = class {
       throw error;
     }
   }
-  /** 统计启用的插件数量。 */
+  /** 读取上一次推送 GitHub 的时间（最新提交时间）。 */
+  async readLastPushAt() {
+    if (!this.services.settings.get("github.token")) return null;
+    try {
+      const commits = await this.services.github().listCommits(1);
+      return commits[0]?.committedAt ?? null;
+    } catch (error) {
+      if (error instanceof GitHubError) return null;
+      throw error;
+    }
+  }
+  /** 统计已安装的 Hexo 插件数量（package.json 中 hexo-* 依赖，不含主题包）。 */
   async countPlugins() {
     if (!this.services.settings.get("github.token")) return 0;
     try {
-      const file = await this.services.github().getFile("_config.yml");
+      const file = await this.services.github().getFile("package.json");
       if (!file) return 0;
-      const parsed = parseMarkdown(file.content);
-      const plugins = parsed.data.plugins;
-      if (Array.isArray(plugins)) return plugins.length;
-      if (plugins && typeof plugins === "object") return Object.keys(plugins).length;
-      return 0;
+      const parsed = JSON.parse(file.content);
+      let count = 0;
+      const push = (deps) => {
+        for (const name of Object.keys(deps ?? {})) {
+          if (name.startsWith("hexo-") && !name.startsWith("hexo-theme-")) {
+            count += 1;
+          }
+        }
+      };
+      push(parsed.dependencies);
+      push(parsed.devDependencies);
+      return count;
     } catch {
       return 0;
     }
@@ -11110,6 +11185,30 @@ var ConfigService = class {
     this.services = services;
   }
   services;
+  /**
+   * 读取站点信息（只读）：从博客仓库 _config.yml 解析。
+   * theme -> theme 字段；title -> title；url -> url；description -> description。
+   * GitHub 不可用或字段缺失时返回空字符串。
+   */
+  async readSiteInfo() {
+    const empty = { title: "", url: "", description: "", theme: "" };
+    if (!this.services.settings.get("github.token")) return empty;
+    try {
+      const file = await this.services.github().getFile("_config.yml");
+      if (!file) return empty;
+      const parsed = yaml2.load(file.content);
+      const str3 = (value) => typeof value === "string" ? value : "";
+      return {
+        title: str3(parsed?.title),
+        url: str3(parsed?.url),
+        description: str3(parsed?.description),
+        theme: str3(parsed?.theme)
+      };
+    } catch (error) {
+      if (error instanceof GitHubError) return empty;
+      return empty;
+    }
+  }
   /** 列出可编辑的配置文件（GitHub 仓库中的 _config*.yml + 本地草稿）。 */
   async listFiles() {
     const currentTheme = this.services.settings.get("site.theme") || "landscape";
@@ -11146,14 +11245,23 @@ var ConfigService = class {
     const active = themeName === currentTheme ? "\uFF08\u5F53\u524D\u4F7F\u7528\uFF09" : "";
     return `\u4E3B\u9898\u914D\u7F6E ${themeName}${active}`;
   }
-  /** 读取配置内容：优先返回快照草稿，否则返回 GitHub 上的内容。 */
+  /**
+   * 读取配置内容：优先返回快照草稿，否则返回 GitHub 上的内容。
+   * 读取 GitHub 内容后同步写入 config_cache，在数据库保留一份镜像，
+   * 供 GitHub 不可用时回退。
+   */
   async read(path) {
     const draft = this.services.configSnapshots.get(path);
     if (draft) {
       return { path, content: draft.content, sha: draft.baseSha, fromDraft: true };
     }
     const file = await this.services.github().getFile(path);
-    return { path, content: file?.content ?? "", sha: file?.sha ?? null, fromDraft: false };
+    const content = file?.content ?? "";
+    const sha = file?.sha ?? null;
+    if (file) {
+      this.services.configCache.save(path, content, sha);
+    }
+    return { path, content, sha, fromDraft: false };
   }
   /** 保存快照草稿到数据库（不推送）。 */
   saveDraft(path, content) {
@@ -11170,8 +11278,10 @@ var ConfigService = class {
     if (!this.services.settings.get("github.token")) {
       throw new ValidationError("\u672A\u914D\u7F6E GitHub Token\uFF0C\u65E0\u6CD5\u63A8\u9001\u914D\u7F6E\u3002\u8BF7\u5148\u5B8C\u6210 GitHub \u5173\u8054\u4ED3\u5E93\u8BBE\u7F6E\u3002");
     }
+    let commitSha = null;
     try {
-      await this.services.github().putFile(path, content, `chore(config): \u66F4\u65B0 ${path}`);
+      const result = await this.services.github().putFile(path, content, `chore(config): \u66F4\u65B0 ${path}`);
+      commitSha = result.sha;
     } catch (error) {
       if (error instanceof GitHubError) {
         throw new ValidationError(`\u63A8\u9001\u914D\u7F6E\u5931\u8D25\uFF1A${error.message}`);
@@ -11179,6 +11289,7 @@ var ConfigService = class {
       throw error;
     }
     this.services.configSnapshots.remove(path);
+    this.services.configCache.save(path, content, commitSha);
   }
   /** 丢弃草稿，恢复为 GitHub 上的版本。 */
   discard(path) {
@@ -11218,6 +11329,7 @@ var ConfigService = class {
     const existing = await this.services.github().getFile(path);
     if (!existing) {
       this.services.configSnapshots.remove(path);
+      this.services.configCache.remove(path);
       return;
     }
     try {
@@ -11229,6 +11341,7 @@ var ConfigService = class {
       throw error;
     }
     this.services.configSnapshots.remove(path);
+    this.services.configCache.remove(path);
   }
 };
 
@@ -13382,6 +13495,15 @@ var ConfigController = class {
     this.ctx = ctx;
   }
   ctx;
+  /** 站点信息（只读）：从 _config.yml 解析 theme/title/url/description。 */
+  siteInfo = async (c) => {
+    try {
+      const info = await this.ctx.config.readSiteInfo();
+      return c.json(ok(info));
+    } catch (error) {
+      return c.json(fail(messageOfError(error), statusOfError(error)), statusOfError(error));
+    }
+  };
   /** 配置文件列表。 */
   list = async (c) => {
     try {
@@ -13721,18 +13843,6 @@ var SettingsController = class {
   testCos = async (c) => {
     return c.json(ok(await this.ctx.settings.testCos()));
   };
-  deployChannels = async (c) => {
-    return c.json(ok(this.ctx.settings.deployChannels()));
-  };
-  deployList = async (c) => {
-    return c.json(ok(this.ctx.deploy.list()));
-  };
-  deployTrigger = async (c) => {
-    const body = await c.req.json();
-    const channel = body.channel ?? "edgeone-pages";
-    const log = await this.ctx.deploy.trigger(channel);
-    return c.json(ok(log, log.status === "success" ? "\u90E8\u7F72\u5DF2\u89E6\u53D1" : log.message));
-  };
   account = async (c) => {
     return c.json(ok(this.ctx.settings.account()));
   };
@@ -13754,12 +13864,6 @@ var SettingsController = class {
     } catch (error) {
       return c.json(fail(messageOfError(error), statusOfError(error)), statusOfError(error));
     }
-  };
-  saveDeploy = async (c) => {
-    const body = await c.req.json();
-    if (!body.channel) return c.json(fail("\u7F3A\u5C11 channel", 422), 422);
-    this.ctx.settings.saveDeploy(body.channel, body.config ?? {});
-    return c.json(ok(null, "\u90E8\u7F72\u914D\u7F6E\u5DF2\u4FDD\u5B58"));
   };
 };
 
@@ -13889,10 +13993,6 @@ function createApp(ctx) {
   api.post("/settings/test-github", settings.testGithub);
   api.post("/settings/test-cos", settings.testCos);
   api.get("/settings/account", settings.account);
-  api.get("/settings/deploy/channels", settings.deployChannels);
-  api.get("/settings/deploy/logs", settings.deployList);
-  api.post("/settings/deploy", settings.saveDeploy);
-  api.post("/settings/deploy/trigger", settings.deployTrigger);
   api.get("/themes", theme.list);
   api.get("/themes/plugins", theme.listPlugins);
   api.post("/themes/install", theme.install);
@@ -13900,6 +14000,7 @@ function createApp(ctx) {
   api.post("/themes/enable", theme.enable);
   api.post("/themes/disable", theme.disable);
   api.get("/config", config.list);
+  api.get("/config/site-info", config.siteInfo);
   api.post("/config", config.create);
   api.get("/config/:path", config.read);
   api.post("/config/:path/draft", config.saveDraft);

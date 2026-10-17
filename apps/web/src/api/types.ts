@@ -2,8 +2,6 @@
 
 export type DocumentKind = "post" | "page";
 export type DocumentStatus = "published" | "draft";
-export type DeployChannel = "github-pages" | "cloudflare-pages" | "edgeone-pages";
-export type DeployStatus = "pending" | "running" | "success" | "failed";
 
 export interface Document {
   id: number;
@@ -70,16 +68,6 @@ export interface Todo {
   updatedAt: string;
 }
 
-export interface DeployLog {
-  id: number;
-  channel: DeployChannel;
-  status: DeployStatus;
-  message: string;
-  triggerBy: string;
-  createdAt: string;
-  finishedAt: string | null;
-}
-
 export interface Asset {
   id: number;
   cosKey: string;
@@ -95,7 +83,7 @@ export interface DashboardData {
   quick: {
     hexoVersion: string;
     theme: string;
-    lastDeployAt: string | null;
+    lastPushAt: string | null;
     pluginCount: number;
     totalPosts: number;
     blogUrl: string;
@@ -109,6 +97,5 @@ export interface DashboardData {
   };
   detail: {
     todos: Todo[];
-    deployLogs: DeployLog[];
   };
 }

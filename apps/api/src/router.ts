@@ -103,11 +103,6 @@ export function createApp(ctx: AppContext): Hono {
   api.post("/settings/test-cos", settings.testCos);
   api.get("/settings/account", settings.account);
 
-  api.get("/settings/deploy/channels", settings.deployChannels);
-  api.get("/settings/deploy/logs", settings.deployList);
-  api.post("/settings/deploy", settings.saveDeploy);
-  api.post("/settings/deploy/trigger", settings.deployTrigger);
-
   // ---- 主题管理 ----
   api.get("/themes", theme.list);
   api.get("/themes/plugins", theme.listPlugins);
@@ -118,6 +113,7 @@ export function createApp(ctx: AppContext): Hono {
 
   // ---- YAML 配置（快照草稿 + 发布 + 新建/删除） ----
   api.get("/config", config.list);
+  api.get("/config/site-info", config.siteInfo);
   api.post("/config", config.create);
   api.get("/config/:path", config.read);
   api.post("/config/:path/draft", config.saveDraft);

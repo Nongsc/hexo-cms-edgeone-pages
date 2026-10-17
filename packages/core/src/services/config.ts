@@ -11,6 +11,7 @@ import type { ServiceContainer } from "./container";
 import type { ConfigSnapshot } from "../types/index";
 import { GitHubError } from "./github";
 import { ValidationError } from "./document";
+import yaml from "js-yaml";
 
 export interface ConfigFileInfo {
   path: string;
@@ -19,8 +20,44 @@ export interface ConfigFileInfo {
   hasDraft: boolean;
 }
 
+export interface SiteInfo {
+  title: string;
+  url: string;
+  description: string;
+  theme: string;
+}
+
 export class ConfigService {
   constructor(private readonly services: ServiceContainer) {}
+
+  /**
+   * 读取站点信息（只读）：从博客仓库 _config.yml 解析。
+   * theme -> theme 字段；title -> title；url -> url；description -> description。
+   * GitHub 不可用或字段缺失时返回空字符串。
+   */
+  async readSiteInfo(): Promise<SiteInfo> {
+    const empty: SiteInfo = { title: "", url: "", description: "", theme: "" };
+    if (!this.services.settings.get("github.token")) return empty;
+
+    try {
+      const file = await this.services.github().getFile("_config.yml");
+      if (!file) return empty;
+
+      // _config.yml 是纯 YAML（无 front-matter），需用 js-yaml 直接解析
+      const parsed = yaml.load(file.content) as Record<string, unknown> | undefined;
+      const str = (value: unknown): string => (typeof value === "string" ? value : "");
+      return {
+        title: str(parsed?.title),
+        url: str(parsed?.url),
+        description: str(parsed?.description),
+        theme: str(parsed?.theme)
+      };
+    } catch (error) {
+      if (error instanceof GitHubError) return empty;
+      // YAML 解析失败等非 GitHub 错误：静默返回空，不阻塞仪表盘
+      return empty;
+    }
+  }
 
   /** 列出可编辑的配置文件（GitHub 仓库中的 _config*.yml + 本地草稿）。 */
   async listFiles(): Promise<ConfigFileInfo[]> {
@@ -75,14 +112,24 @@ export class ConfigService {
     return `主题配置 ${themeName}${active}`;
   }
 
-  /** 读取配置内容：优先返回快照草稿，否则返回 GitHub 上的内容。 */
+  /**
+   * 读取配置内容：优先返回快照草稿，否则返回 GitHub 上的内容。
+   * 读取 GitHub 内容后同步写入 config_cache，在数据库保留一份镜像，
+   * 供 GitHub 不可用时回退。
+   */
   async read(path: string): Promise<{ path: string; content: string; sha: string | null; fromDraft: boolean }> {
     const draft = this.services.configSnapshots.get(path);
     if (draft) {
       return { path, content: draft.content, sha: draft.baseSha, fromDraft: true };
     }
     const file = await this.services.github().getFile(path);
-    return { path, content: file?.content ?? "", sha: file?.sha ?? null, fromDraft: false };
+    const content = file?.content ?? "";
+    const sha = file?.sha ?? null;
+    // 镜像缓存到数据库
+    if (file) {
+      this.services.configCache.save(path, content, sha);
+    }
+    return { path, content, sha, fromDraft: false };
   }
 
   /** 保存快照草稿到数据库（不推送）。 */
@@ -102,16 +149,19 @@ export class ConfigService {
     if (!this.services.settings.get("github.token")) {
       throw new ValidationError("未配置 GitHub Token，无法推送配置。请先完成 GitHub 关联仓库设置。");
     }
+    let commitSha: string | null = null;
     try {
-      await this.services.github().putFile(path, content, `chore(config): 更新 ${path}`);
+      const result = await this.services.github().putFile(path, content, `chore(config): 更新 ${path}`);
+      commitSha = result.sha;
     } catch (error) {
       if (error instanceof GitHubError) {
         throw new ValidationError(`推送配置失败：${error.message}`);
       }
       throw error;
     }
-    // 发布成功后清除草稿
+    // 发布成功后：清除草稿，并同步镜像缓存到数据库
     this.services.configSnapshots.remove(path);
+    this.services.configCache.save(path, content, commitSha);
   }
 
   /** 丢弃草稿，恢复为 GitHub 上的版本。 */
@@ -158,8 +208,9 @@ export class ConfigService {
 
     const existing = await this.services.github().getFile(path);
     if (!existing) {
-      // GitHub 上不存在，仅清理本地草稿
+      // GitHub 上不存在，仅清理本地草稿与缓存
       this.services.configSnapshots.remove(path);
+      this.services.configCache.remove(path);
       return;
     }
 
@@ -172,5 +223,6 @@ export class ConfigService {
       throw error;
     }
     this.services.configSnapshots.remove(path);
+    this.services.configCache.remove(path);
   }
 }

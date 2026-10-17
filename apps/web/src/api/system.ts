@@ -1,7 +1,6 @@
-/** 系统管理接口：设置、部署、YAML 配置、主题、账号。 */
+/** 系统管理接口：设置、YAML 配置、主题、账号。 */
 
 import { get, post, put, del } from "@/utils/http";
-import type { DeployChannel, DeployLog } from "./types";
 
 export interface SettingsMap {
   [key: string]: string;
@@ -21,28 +20,6 @@ export function testGitHub(): Promise<{ ok: boolean; message: string; repo?: str
 
 export function testCos(): Promise<{ ok: boolean; message: string; diagnosis?: string }> {
   return post<{ ok: boolean; message: string; diagnosis?: string }>("/settings/test-cos");
-}
-
-export interface DeployChannelInfo {
-  value: DeployChannel;
-  label: string;
-  description: string;
-}
-
-export function getDeployChannels(): Promise<DeployChannelInfo[]> {
-  return get<DeployChannelInfo[]>("/settings/deploy/channels");
-}
-
-export function getDeployLogs(): Promise<DeployLog[]> {
-  return get<DeployLog[]>("/settings/deploy/logs");
-}
-
-export function triggerDeploy(channel: DeployChannel): Promise<DeployLog> {
-  return post<DeployLog>("/settings/deploy/trigger", { channel });
-}
-
-export function saveDeployConfig(channel: DeployChannel, config: Record<string, string>): Promise<null> {
-  return post<null>("/settings/deploy", { channel, config });
 }
 
 // ---- 主题 ----
@@ -102,6 +79,18 @@ export interface ConfigFileInfo {
 
 export function listConfigFiles(): Promise<ConfigFileInfo[]> {
   return get<ConfigFileInfo[]>("/config");
+}
+
+/** 站点信息（只读）：从 _config.yml 解析。 */
+export interface SiteInfo {
+  title: string;
+  url: string;
+  description: string;
+  theme: string;
+}
+
+export function getSiteInfo(): Promise<SiteInfo> {
+  return get<SiteInfo>("/config/site-info");
 }
 
 export function createThemeConfig(themeName: string, content = ""): Promise<{ path: string }> {

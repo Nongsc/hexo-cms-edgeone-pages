@@ -3,6 +3,7 @@
 import { ensureDatabase, type AppDatabase } from "../db/sqlite";
 import {
   AssetRepository,
+  ConfigCacheRepository,
   ConfigSnapshotRepository,
   DeployLogRepository,
   DocumentRepository,
@@ -22,6 +23,7 @@ export interface ServiceContainer {
   settings: SettingRepository;
   users: UserRepository;
   configSnapshots: ConfigSnapshotRepository;
+  configCache: ConfigCacheRepository;
   github: () => GitHubClient;
   cos: () => CosClient;
 }
@@ -43,6 +45,7 @@ export async function createServices(db?: AppDatabase): Promise<ServiceContainer
     settings,
     users: new UserRepository(database),
     configSnapshots: new ConfigSnapshotRepository(database),
+    configCache: new ConfigCacheRepository(database),
     github() {
       if (!githubClient) {
         githubClient = new GitHubClient(readGitHubConfig(settings));

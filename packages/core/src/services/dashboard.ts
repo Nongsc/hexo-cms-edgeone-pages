@@ -1,7 +1,6 @@
 /** DashboardService：主页四层布局所需的全部数据。 */
 
 import type { ServiceContainer } from "./container";
-import { parseMarkdown } from "../utils/markdown";
 import { GitHubError } from "./github";
 
 export interface DashboardData {
@@ -9,7 +8,7 @@ export interface DashboardData {
   quick: {
     hexoVersion: string;
     theme: string;
-    lastDeployAt: string | null;
+    lastPushAt: string | null;
     pluginCount: number;
     totalPosts: number;
     blogUrl: string;
@@ -33,17 +32,9 @@ export interface DashboardData {
       path: string;
     }>;
   };
-  /** 第四层：待办与部署信息。 */
+  /** 第四层：待办。 */
   detail: {
     todos: Array<{ id: number; title: string; done: boolean; createdAt: string }>;
-    deployLogs: Array<{
-      id: number;
-      channel: string;
-      status: string;
-      message: string;
-      createdAt: string;
-      finishedAt: string | null;
-    }>;
   };
 }
 
@@ -52,14 +43,13 @@ export class DashboardService {
 
   async load(): Promise<DashboardData> {
     const stats = this.services.documents.stats();
-    const lastDeploy = this.services.deployLogs.latest();
     const theme = this.services.settings.get("site.theme") || "landscape";
 
     return {
       quick: {
         hexoVersion: await this.readHexoVersion(),
         theme,
-        lastDeployAt: lastDeploy?.finishedAt ?? lastDeploy?.createdAt ?? null,
+        lastPushAt: await this.readLastPushAt(),
         pluginCount: await this.countPlugins(),
         totalPosts: stats.totalPosts,
         blogUrl: this.services.settings.get("site.url") || ""
@@ -77,8 +67,7 @@ export class DashboardService {
         recentPosts: this.services.documents.recentPosts(5)
       },
       detail: {
-        todos: this.services.todos.list(),
-        deployLogs: this.services.deployLogs.list(20)
+        todos: this.services.todos.list()
       }
     };
   }
@@ -101,17 +90,39 @@ export class DashboardService {
     }
   }
 
-  /** 统计启用的插件数量。 */
+  /** 读取上一次推送 GitHub 的时间（最新提交时间）。 */
+  private async readLastPushAt(): Promise<string | null> {
+    if (!this.services.settings.get("github.token")) return null;
+    try {
+      const commits = await this.services.github().listCommits(1);
+      return commits[0]?.committedAt ?? null;
+    } catch (error) {
+      if (error instanceof GitHubError) return null;
+      throw error;
+    }
+  }
+
+  /** 统计已安装的 Hexo 插件数量（package.json 中 hexo-* 依赖，不含主题包）。 */
   private async countPlugins(): Promise<number> {
     if (!this.services.settings.get("github.token")) return 0;
     try {
-      const file = await this.services.github().getFile("_config.yml");
+      const file = await this.services.github().getFile("package.json");
       if (!file) return 0;
-      const parsed = parseMarkdown(file.content);
-      const plugins = parsed.data.plugins;
-      if (Array.isArray(plugins)) return plugins.length;
-      if (plugins && typeof plugins === "object") return Object.keys(plugins).length;
-      return 0;
+      const parsed = JSON.parse(file.content) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
+      let count = 0;
+      const push = (deps: Record<string, string> | undefined) => {
+        for (const name of Object.keys(deps ?? {})) {
+          if (name.startsWith("hexo-") && !name.startsWith("hexo-theme-")) {
+            count += 1;
+          }
+        }
+      };
+      push(parsed.dependencies);
+      push(parsed.devDependencies);
+      return count;
     } catch {
       return 0;
     }

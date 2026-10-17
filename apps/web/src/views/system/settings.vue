@@ -111,26 +111,27 @@
         </el-form>
       </el-tab-pane>
 
-      <!-- 站点信息 -->
+      <!-- 站点信息（只读，来自博客仓库 _config.yml） -->
       <el-tab-pane label="站点信息" name="general">
-        <el-form :model="form" label-width="120px" class="settings-form">
+        <el-alert
+          title="站点信息为只读，来自博客仓库 _config.yml（title / url / description / theme）。如需修改请在「YAML 配置」中编辑 _config.yml。"
+          type="info"
+          :closable="false"
+          show-icon
+          class="pane-alert"
+        />
+        <el-form label-width="120px" class="settings-form">
           <el-form-item label="站点标题">
-            <el-input v-model="form['site.title']" />
+            <el-input :model-value="siteInfo.title" disabled placeholder="读取 _config.yml 的 title" />
           </el-form-item>
           <el-form-item label="博客前台地址">
-            <el-input v-model="form['site.url']" placeholder="https://example.com" />
+            <el-input :model-value="siteInfo.url" disabled placeholder="读取 _config.yml 的 url" />
           </el-form-item>
           <el-form-item label="站点描述">
-            <el-input v-model="form['site.description']" type="textarea" :rows="2" />
+            <el-input :model-value="siteInfo.description" type="textarea" :rows="2" disabled placeholder="读取 _config.yml 的 description" />
           </el-form-item>
           <el-form-item label="当前主题">
-            <el-input v-model="form['site.theme']" placeholder="landscape" />
-          </el-form-item>
-          <el-form-item label="每页文章数">
-            <el-input-number v-model="postsPerPage" :min="1" :max="100" />
-          </el-form-item>
-          <el-form-item>
-            <el-button type="primary" :loading="saving" @click="save('general')">保存设置</el-button>
+            <el-input :model-value="siteInfo.theme" disabled placeholder="读取 _config.yml 的 theme" />
           </el-form-item>
         </el-form>
       </el-tab-pane>
@@ -141,12 +142,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
-import { getSettings, saveSettings, testCos, testGitHub } from "@/api/system";
+import { getSettings, saveSettings, testCos, testGitHub, getSiteInfo, type SiteInfo } from "@/api/system";
 
 const activeTab = ref("cos");
 const saving = ref(false);
 const testing = ref(false);
 const form = reactive<Record<string, string>>({});
+const siteInfo = reactive<SiteInfo>({ title: "", url: "", description: "", theme: "" });
 
 const cosRegions = [
   "ap-beijing",
@@ -169,13 +171,6 @@ const aiEnabled = computed({
   }
 });
 
-const postsPerPage = computed({
-  get: () => Number(form["site.postsPerPage"] ?? 10),
-  set: (value: number) => {
-    form["site.postsPerPage"] = String(value);
-  }
-});
-
 async function load(): Promise<void> {
   const data = await getSettings();
   for (const [key, value] of Object.entries(data)) {
@@ -186,6 +181,22 @@ async function load(): Promise<void> {
     localStorage.setItem("blog-url", form["site.url"]);
   } else {
     localStorage.removeItem("blog-url");
+  }
+  await loadSiteInfo();
+}
+
+/** 加载只读站点信息（来自 _config.yml）。 */
+async function loadSiteInfo(): Promise<void> {
+  try {
+    const info = await getSiteInfo();
+    siteInfo.title = info.title;
+    siteInfo.url = info.url;
+    siteInfo.description = info.description;
+    siteInfo.theme = info.theme;
+    // 同步博客前台地址
+    if (info.url) localStorage.setItem("blog-url", info.url);
+  } catch (error) {
+    ElMessage.error(`读取站点信息失败：${(error as Error).message}`);
   }
 }
 
@@ -198,11 +209,6 @@ async function save(group: string): Promise<void> {
       if (key.startsWith(prefix)) entries[key] = value;
     }
     await saveSettings(entries);
-    // 保存站点信息时同步刷新博客前台地址
-    if (group === "general") {
-      if (form["site.url"]) localStorage.setItem("blog-url", form["site.url"]);
-      else localStorage.removeItem("blog-url");
-    }
     ElMessage.success("设置已保存");
   } catch (error) {
     ElMessage.error((error as Error).message);

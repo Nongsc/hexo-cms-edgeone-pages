@@ -246,6 +246,20 @@ const MIGRATIONS: Array<{ version: number; statements: string[] }> = [
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );`
     ]
+  },
+  {
+    version: 3,
+    statements: [
+      // 配置镜像缓存：YAML 配置内容在数据库保留一份，
+      // 读取 GitHub 后缓存，GitHub 不可用时作为回退来源。
+      `CREATE TABLE IF NOT EXISTS config_cache (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT NOT NULL UNIQUE,
+        content TEXT NOT NULL,
+        base_sha TEXT,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );`
+    ]
   }
 ];
 
