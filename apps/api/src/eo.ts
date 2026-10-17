@@ -21,7 +21,7 @@ import {
   ensureDatabase,
   persistDatabase,
   RemoteDatabase,
-  resolveDatabasePath
+  resolveLocalDatabasePath
 } from "@hexo-pro/core";
 import { createApp } from "./router";
 import { createContext } from "./context";
@@ -74,7 +74,9 @@ function createRemoteDb(): RemoteDatabase | null {
       domain: process.env.COS_DOMAIN ?? "",
       folder: process.env.COS_FOLDER ?? "images"
     },
-    localPath: resolveDatabasePath(process.env.CMS_DB_PATH ?? "apps/api/data/cms.sqlite")
+    // 复用 resolveLocalDatabasePath，保证与 ensureDatabase/persistDatabase
+    // 使用同一路径（否则 sync 读不到 persist 导出的文件，导致从不持久化）
+    localPath: resolveLocalDatabasePath()
   });
 }
 

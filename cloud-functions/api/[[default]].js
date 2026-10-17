@@ -5845,7 +5845,7 @@ function hasNativeSqlite() {
   const minor = Number(process.versions.node.split(".")[1]);
   return major > 22 || major === 22 && minor >= 5;
 }
-function localDatabasePath() {
+function resolveLocalDatabasePath() {
   const configured = process.env.CMS_DB_PATH;
   if (configured) {
     return resolveDatabasePath(configured);
@@ -5857,7 +5857,7 @@ function localDatabasePath() {
 }
 async function ensureDatabase() {
   if (singleton) return singleton;
-  const path = localDatabasePath();
+  const path = resolveLocalDatabasePath();
   const driver = process.env.CMS_DB_DRIVER ?? (hasNativeSqlite() ? "native" : "sqljs");
   if (driver === "native") {
     if (path !== ":memory:") {
@@ -5892,7 +5892,7 @@ function getDatabase() {
 }
 function persistDatabase() {
   if (!singleton || !usingSqlJs) return;
-  const path = localDatabasePath();
+  const path = resolveLocalDatabasePath();
   if (path === ":memory:") return;
   const bytes = singleton.export();
   mkdirSync(dirname(path), { recursive: true });
@@ -13986,7 +13986,9 @@ function createRemoteDb() {
       domain: process.env.COS_DOMAIN ?? "",
       folder: process.env.COS_FOLDER ?? "images"
     },
-    localPath: resolveDatabasePath(process.env.CMS_DB_PATH ?? "apps/api/data/cms.sqlite")
+    // 复用 resolveLocalDatabasePath，保证与 ensureDatabase/persistDatabase
+    // 使用同一路径（否则 sync 读不到 persist 导出的文件，导致从不持久化）
+    localPath: resolveLocalDatabasePath()
   });
 }
 async function onRequest(context) {

@@ -51,8 +51,12 @@ function hasNativeSqlite(): boolean {
   return major > 22 || (major === 22 && minor >= 5);
 }
 
-/** 本地数据库文件路径。 */
-function localDatabasePath(): string {
+/**
+ * 本地数据库文件路径（部署环境与开发环境统一入口）。
+ * 导出供 remote.ts / eo.ts 复用，保证「数据库实际读写位置」
+ * 与「云端持久化下载/上传位置」始终一致。
+ */
+export function resolveLocalDatabasePath(): string {
   const configured = process.env.CMS_DB_PATH;
   if (configured) {
     return resolveDatabasePath(configured);
@@ -77,7 +81,7 @@ function localDatabasePath(): string {
 export async function ensureDatabase(): Promise<AppDatabase> {
   if (singleton) return singleton;
 
-  const path = localDatabasePath();
+  const path = resolveLocalDatabasePath();
   const driver = process.env.CMS_DB_DRIVER ?? (hasNativeSqlite() ? "native" : "sqljs");
 
   if (driver === "native") {
@@ -130,7 +134,7 @@ export function isUsingSqlJs(): boolean {
  */
 export function persistDatabase(): void {
   if (!singleton || !usingSqlJs) return;
-  const path = localDatabasePath();
+  const path = resolveLocalDatabasePath();
   if (path === ":memory:") return;
   const bytes = (singleton as SqlJsCompatDatabase).export();
   mkdirSync(dirname(path), { recursive: true });
