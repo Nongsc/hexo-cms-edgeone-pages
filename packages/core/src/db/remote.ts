@@ -70,7 +70,10 @@ export class RemoteDatabase {
 
     try {
       const buffer = readFileSync(this.localPath);
-      await this.cos.putObject(DB_COS_KEY, buffer, "application/octet-stream", "cms/database");
+      // 必须用 putObjectByKey（按完整键上传）：
+      // putObject 会把 key 里的 "/" 转义为 "_" 并拼接 folder 前缀，
+      // 导致写入的键与 getObject 读取的键不一致，持久化失效。
+      await this.cos.putObjectByKey(DB_COS_KEY, buffer, "application/octet-stream");
       this.lastSyncMtimeMs = mtime;
       console.log(`[remote-db] 数据库已同步到 COS (${buffer.length} bytes)`);
     } catch (error) {

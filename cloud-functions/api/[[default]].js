@@ -6118,6 +6118,24 @@ var CosClient = class {
     }
     return Buffer.from(await response.arrayBuffer());
   }
+  /**
+   * 按完整对象键上传（不做 folder 拼接与文件名转义）。
+   *
+   * 与 putObject 的区别：putObject 面向图片上传，会把 filename 里的
+   * "/" 转义为 "_" 并拼接 folder 前缀；这里直接按给定的完整 key 写入，
+   * 用于数据库备份等需要精确控制键名的场景。
+   */
+  async putObjectByKey(key, body, contentType) {
+    this.requireConfigured();
+    const buffer = Buffer.from(body);
+    const response = await this.signedFetch("PUT", `/${encodeKey(key)}`, "", {
+      body: new Uint8Array(buffer),
+      contentType
+    });
+    if (!response.ok) {
+      throw await this.toError("\u4E0A\u4F20", response);
+    }
+  }
   /** 列出对象（分页）。 */
   async listObjects(prefix = "", maxKeys = 100, marker = "") {
     this.requireConfigured();
@@ -6319,7 +6337,7 @@ var RemoteDatabase = class {
     if (mtime === this.lastSyncMtimeMs) return;
     try {
       const buffer = readFileSync2(this.localPath);
-      await this.cos.putObject(DB_COS_KEY, buffer, "application/octet-stream", "cms/database");
+      await this.cos.putObjectByKey(DB_COS_KEY, buffer, "application/octet-stream");
       this.lastSyncMtimeMs = mtime;
       console.log(`[remote-db] \u6570\u636E\u5E93\u5DF2\u540C\u6B65\u5230 COS (${buffer.length} bytes)`);
     } catch (error) {
